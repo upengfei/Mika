@@ -72,7 +72,7 @@ android {
             initWith(getByName("debug"))
             applicationIdSuffix = ".test"
             versionNameSuffix = "-test"
-            resValue("string", "app_name", "Mika Test Workspace")
+            resValue("string", "app_name", "MP工作台")
         }
     }
 

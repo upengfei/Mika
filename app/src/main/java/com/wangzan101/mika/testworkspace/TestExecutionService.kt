@@ -68,6 +68,7 @@ data class TestScheduleReceipt(val scheduleId: String, val firstAtMs: Long, val 
 /** Read-only access to Mika's persisted run evidence for the test workspace. */
 class TestRunRepository(private val store: RunStore) {
     fun list() = store.list()
+    fun testRuns() = store.list().filter { it.goal.contains("Test task id:") }
     fun events(runId: String) = store.events(runId)
     fun screenshot(runId: String, screenshotId: Int) = store.screen(runId, screenshotId)
 }
