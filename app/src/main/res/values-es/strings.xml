@@ -34,6 +34,16 @@
     <string name="test_workspace_new_project">Nuevo proyecto</string>
     <string name="test_workspace_new_suite">Nueva suite</string>
     <string name="test_workspace_project_name">Nombre del proyecto</string>
+    <string name="test_workspace_project_description">Descripción</string>
+    <string name="test_workspace_edit_project">Editar proyecto</string>
+    <string name="test_workspace_edit_suite">Editar suite</string>
+    <string name="test_workspace_delete_project">Eliminar proyecto</string>
+    <string name="test_workspace_delete_project_note">Archiva el proyecto y elimina sus suites y casos antes de borrarlo definitivamente.</string>
+    <string name="test_workspace_delete_suite">Eliminar suite</string>
+    <string name="test_workspace_delete_suite_note">No se puede eliminar una suite que contiene casos. Muévelos o elimínalos primero.</string>
+    <string name="test_workspace_no_projects">No hay proyectos en esta vista.</string>
+    <string name="test_workspace_no_suites">Este proyecto aún no tiene suites.</string>
+    <string name="test_workspace_suite_case_count">%1$d casos</string>
     <string name="test_workspace_suite_name">Nombre de la suite</string>
     <string name="test_workspace_search">Buscar casos</string>
     <string name="test_workspace_create">Crear caso</string>

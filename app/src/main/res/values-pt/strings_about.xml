@@ -4,6 +4,10 @@
     <string name="about_check">Verificar atualizações</string>
     <string name="about_check_sub">Baixe novas versões pelo GitHub Releases</string>
     <string name="about_check_sub_new">Nova versão disponível</string>
+    <string name="about_checking_title">Verificando atualizações</string>
+    <string name="about_checking_body">O Mika está verificando a versão mais recente. O resultado aparecerá aqui quando a verificação terminar.</string>
+    <string name="about_up_to_date_body">Você está usando a versão mais recente disponível do Mika.</string>
+    <string name="about_offline_body">O Mika não conseguiu acessar o serviço de versões. Verifique sua conexão e tente novamente.</string>
     <string name="about_up_to_date">Atualizado</string>
     <string name="about_up_to_date_toast">Você já está na versão mais recente</string>
     <string name="about_offline">Não foi possível acessar o GitHub</string>

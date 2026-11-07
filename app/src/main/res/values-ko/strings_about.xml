@@ -4,6 +4,10 @@
     <string name="about_check">업데이트 확인</string>
     <string name="about_check_sub">GitHub Releases에서 새 버전 받기</string>
     <string name="about_check_sub_new">새 버전이 있어요</string>
+    <string name="about_checking_title">업데이트 확인 중</string>
+    <string name="about_checking_body">Mika가 최신 릴리스를 확인하고 있습니다. 확인이 끝나면 여기에 결과가 표시됩니다.</string>
+    <string name="about_up_to_date_body">현재 사용 가능한 최신 Mika 버전을 사용 중입니다.</string>
+    <string name="about_offline_body">릴리스 서비스에 연결할 수 없습니다. 연결을 확인한 뒤 다시 시도하세요.</string>
     <string name="about_up_to_date">최신 버전</string>
     <string name="about_up_to_date_toast">최신 버전을 사용 중이에요</string>
     <string name="about_offline">GitHub에 연결할 수 없어요</string>

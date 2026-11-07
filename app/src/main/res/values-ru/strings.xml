@@ -34,6 +34,16 @@
     <string name="test_workspace_new_project">Новый проект</string>
     <string name="test_workspace_new_suite">Новый набор</string>
     <string name="test_workspace_project_name">Название проекта</string>
+    <string name="test_workspace_project_description">Описание</string>
+    <string name="test_workspace_edit_project">Изменить проект</string>
+    <string name="test_workspace_edit_suite">Изменить набор</string>
+    <string name="test_workspace_delete_project">Удалить проект</string>
+    <string name="test_workspace_delete_project_note">Архивируйте проект и очистите наборы и тесты перед окончательным удалением.</string>
+    <string name="test_workspace_delete_suite">Удалить набор</string>
+    <string name="test_workspace_delete_suite_note">Нельзя удалить набор, содержащий тесты. Сначала переместите или удалите их.</string>
+    <string name="test_workspace_no_projects">В этом представлении нет проектов.</string>
+    <string name="test_workspace_no_suites">В этом проекте пока нет наборов.</string>
+    <string name="test_workspace_suite_case_count">Тестов: %1$d</string>
     <string name="test_workspace_suite_name">Название набора</string>
     <string name="test_workspace_search">Поиск тестов</string>
     <string name="test_workspace_create">Создать тест</string>

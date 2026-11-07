@@ -92,6 +92,27 @@ class TestCaseRepositoryTest {
         }
     }
 
+    @Test fun archivedProjectHidesItsAssetsAndPermanentDeletionRequiresEmptyProject() {
+        val repository = TestCaseRepository(Files.createTempDirectory("project-lifecycle").toFile(), legacyTasksDir = FileAbsent)
+        val project = repository.createProject("Shop", "Checkout scenarios")
+        val suite = repository.createSuite(project.id, "Payments")
+        val testCase = repository.createCase(contract(), project.id, suite.id)
+
+        repository.archiveProject(project.id, true)
+
+        assertTrue(repository.projects().none { it.id == project.id })
+        assertEquals("Checkout scenarios", repository.project(project.id)?.description)
+        assertTrue(repository.search(projectId = project.id).isEmpty())
+        assertEquals(testCase.id, repository.search(projectId = project.id, includeArchived = true).single().id)
+        assertTrue(runCatching { repository.deleteProject(project.id) }.isFailure)
+
+        repository.archiveProject(project.id, false)
+        assertFalse(repository.project(project.id)?.archived == true)
+        repository.deleteCase(testCase.id)
+        repository.deleteSuite(suite.id)
+        assertTrue(repository.deleteProject(project.id))
+    }
+
     private companion object {
         val FileAbsent = Files.createTempDirectory("no-legacy").resolve("absent").toFile()
     }

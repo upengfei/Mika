@@ -34,6 +34,16 @@
     <string name="test_workspace_new_project">New project</string>
     <string name="test_workspace_new_suite">New suite</string>
     <string name="test_workspace_project_name">Project name</string>
+    <string name="test_workspace_project_description">Description</string>
+    <string name="test_workspace_edit_project">Edit project</string>
+    <string name="test_workspace_edit_suite">Edit suite</string>
+    <string name="test_workspace_delete_project">Delete project</string>
+    <string name="test_workspace_delete_project_note">The project must be archived and have no suites or cases before it can be permanently deleted.</string>
+    <string name="test_workspace_delete_suite">Delete suite</string>
+    <string name="test_workspace_delete_suite_note">A suite with cases cannot be deleted. Move or delete its cases first.</string>
+    <string name="test_workspace_no_projects">No projects in this view.</string>
+    <string name="test_workspace_no_suites">This project has no suites yet.</string>
+    <string name="test_workspace_suite_case_count">%1$d cases</string>
     <string name="test_workspace_suite_name">Suite name</string>
     <string name="test_workspace_search">Search cases</string>
     <string name="test_workspace_create">Create case</string>

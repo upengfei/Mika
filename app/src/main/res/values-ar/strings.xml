@@ -34,6 +34,16 @@
     <string name="test_workspace_new_project">مشروع جديد</string>
     <string name="test_workspace_new_suite">مجموعة جديدة</string>
     <string name="test_workspace_project_name">اسم المشروع</string>
+    <string name="test_workspace_project_description">الوصف</string>
+    <string name="test_workspace_edit_project">تعديل المشروع</string>
+    <string name="test_workspace_edit_suite">تعديل المجموعة</string>
+    <string name="test_workspace_delete_project">حذف المشروع</string>
+    <string name="test_workspace_delete_project_note">يجب أرشفة المشروع وإفراغ المجموعات وحالات الاختبار قبل حذفه نهائياً.</string>
+    <string name="test_workspace_delete_suite">حذف المجموعة</string>
+    <string name="test_workspace_delete_suite_note">لا يمكن حذف مجموعة تحتوي على حالات اختبار. انقل الحالات أو احذفها أولاً.</string>
+    <string name="test_workspace_no_projects">لا توجد مشاريع في هذا العرض.</string>
+    <string name="test_workspace_no_suites">لا توجد مجموعات لهذا المشروع بعد.</string>
+    <string name="test_workspace_suite_case_count">%1$d حالة اختبار</string>
     <string name="test_workspace_suite_name">اسم المجموعة</string>
     <string name="test_workspace_search">البحث عن الحالات</string>
     <string name="test_workspace_create">إنشاء حالة</string>

@@ -46,8 +46,9 @@ import com.wangzan101.mika.ui.components.ButtonSize
 import com.wangzan101.mika.ui.components.EmptyNote
 import com.wangzan101.mika.ui.components.GroupCard
 import com.wangzan101.mika.ui.components.GroupLabel
+import com.wangzan101.mika.ui.components.ListRow
 import com.wangzan101.mika.ui.components.MikaButton
-import com.wangzan101.mika.ui.components.SegmentedControl
+import com.wangzan101.mika.ui.components.RowChevron
 import com.wangzan101.mika.ui.components.StateCard
 import com.wangzan101.mika.ui.components.SubPage
 import com.wangzan101.mika.ui.components.TileTone
@@ -60,11 +61,15 @@ import java.util.Date
 import java.util.UUID
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.wangzan101.mika.task.TriggerRuntime
+
+private enum class TestWorkspaceSection { Projects, Suites, Cases, History }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
-    BackHandler(onBack = onBack)
+    var section by remember { mutableStateOf<TestWorkspaceSection?>(null) }
+    BackHandler(onBack = { if (section == null) onBack() else section = null })
     val repository = remember {
         TestCaseRepository(File(context.filesDir, "test-case-repository"), File(context.filesDir, "test-tasks"))
     }
@@ -78,14 +83,19 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
     var cases by remember { mutableStateOf(repository.search(projectId = selectedProjectId)) }
     var runs by remember { mutableStateOf(runRepository.testRuns()) }
     var query by remember { mutableStateOf("") }
-    var selectedTab by remember { mutableStateOf(0) }
     var showArchived by remember { mutableStateOf(false) }
+    var showArchivedProjects by remember { mutableStateOf(false) }
     var expandedCaseId by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    var projectMenu by remember { mutableStateOf(false) }
     var suiteMenu by remember { mutableStateOf(false) }
-    var namingKind by remember { mutableStateOf<String?>(null) }
-    var namingValue by remember { mutableStateOf("") }
+    var projectEditorOpen by remember { mutableStateOf(false) }
+    var projectEditorId by remember { mutableStateOf<String?>(null) }
+    var projectEditorName by remember { mutableStateOf("") }
+    var projectEditorDescription by remember { mutableStateOf("") }
+    var pendingProjectDelete by remember { mutableStateOf<String?>(null) }
+    var suiteEditorId by remember { mutableStateOf<String?>(null) }
+    var suiteEditorName by remember { mutableStateOf("") }
+    var pendingSuiteDelete by remember { mutableStateOf<String?>(null) }
     var editorId by remember { mutableStateOf<String?>(null) }
     var editorOpen by remember { mutableStateOf(false) }
     var editorName by remember { mutableStateOf("") }
@@ -154,29 +164,104 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
         pendingReportFile = null
     }
 
-    SubPage(stringResource(R.string.drawer_test_workspace), onBack) {
-        Text(stringResource(R.string.test_workspace_intro), style = MikaType.Body, color = MikaTheme.colors.ink2)
-        SegmentedControl(
-            options = listOf(stringResource(R.string.test_workspace_tasks), stringResource(R.string.test_workspace_history)),
-            selected = selectedTab,
-            onSelect = { selectedTab = it; error = null },
-            modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
-        )
-
-        if (selectedTab == 0) {
+    val pageTitle = when (section) {
+        TestWorkspaceSection.Projects -> stringResource(R.string.test_workspace_project)
+        TestWorkspaceSection.Suites -> stringResource(R.string.test_workspace_suite)
+        TestWorkspaceSection.Cases -> stringResource(R.string.test_workspace_cases)
+        TestWorkspaceSection.History -> stringResource(R.string.test_workspace_history)
+        null -> stringResource(R.string.drawer_test_workspace)
+    }
+    SubPage(pageTitle, onBack = { if (section == null) onBack() else section = null }) {
+        when (section) {
+        null -> {
+            Text(stringResource(R.string.test_workspace_intro), style = MikaType.Body, color = MikaTheme.colors.ink2)
+            GroupCard {
+                ListRow(MikaIcons.Apps, stringResource(R.string.test_workspace_project), first = true, onClick = { section = TestWorkspaceSection.Projects }) { RowChevron() }
+                ListRow(MikaIcons.Lines, stringResource(R.string.test_workspace_suite), onClick = { section = TestWorkspaceSection.Suites }) { RowChevron() }
+                ListRow(MikaIcons.Check, stringResource(R.string.test_workspace_cases), onClick = { section = TestWorkspaceSection.Cases }) { RowChevron() }
+                ListRow(MikaIcons.Clock, stringResource(R.string.test_workspace_history), onClick = { section = TestWorkspaceSection.History; runs = runRepository.testRuns() }) { RowChevron() }
+            }
+        }
+        TestWorkspaceSection.Projects -> {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MikaButton(stringResource(R.string.test_workspace_new_project), onClick = {
+                    projectEditorOpen = true; projectEditorId = null; projectEditorName = ""; projectEditorDescription = ""; error = null
+                }, modifier = Modifier.weight(1f), size = ButtonSize.Medium)
+                TextButton(onClick = { showArchivedProjects = !showArchivedProjects }) {
+                    Text(if (showArchivedProjects) stringResource(R.string.test_workspace_show_active) else stringResource(R.string.test_workspace_show_archived))
+                }
+            }
+            val visibleProjects = repository.projects(includeArchived = showArchivedProjects).filter { it.archived == showArchivedProjects }
+            GroupLabel(if (showArchivedProjects) stringResource(R.string.test_workspace_archived) else stringResource(R.string.test_workspace_project))
+            if (visibleProjects.isEmpty()) EmptyNote(stringResource(R.string.test_workspace_no_projects))
+            visibleProjects.forEach { project ->
+                GroupCard {
+                    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                        Text(project.name, style = MikaType.BodyStrong, color = MikaTheme.colors.ink)
+                        project.description.takeIf(String::isNotBlank)?.let { Text(it, Modifier.padding(top = 4.dp), style = MikaType.Caption, color = MikaTheme.colors.ink3) }
+                        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = {
+                                projectEditorOpen = true; projectEditorId = project.id; projectEditorName = project.name
+                                projectEditorDescription = project.description; error = null
+                            }) { Text(stringResource(R.string.test_workspace_edit)) }
+                            if (project.id != TestCaseRepository.DEFAULT_PROJECT) {
+                        TextButton(onClick = {
+                                    runCatching {
+                                        if (!project.archived) {
+                                            val linked = repository.search(projectId = project.id, includeArchived = true)
+                                            val activeScheduleIds = TriggerRuntime.list(context).filter { it.enabled }.mapTo(mutableSetOf()) { it.id }
+                                            linked.map { "test-${it.id}" }.filter { it in activeScheduleIds }.forEach { id ->
+                                                check(TriggerRuntime.setEnabled(context, id, false)) { "Could not pause test schedule $id" }
+                                            }
+                                        }
+                                        repository.archiveProject(project.id, !project.archived)
+                                        if (selectedProjectId == project.id && project.archived) selectedProjectId = repository.projects().firstOrNull()?.id ?: TestCaseRepository.DEFAULT_PROJECT
+                                        refreshCases()
+                                    }.onFailure { error = it.message }
+                                }) { Text(stringResource(if (project.archived) R.string.test_workspace_restore else R.string.test_workspace_archive)) }
+                            if (project.archived) TextButton(onClick = { pendingProjectDelete = project.id }) { Text(stringResource(R.string.test_workspace_delete)) }
+                            }
+                        }
+                    }
+                }
+            }
+            error?.let { Text(it, Modifier.padding(top = 8.dp), style = MikaType.Caption, color = MikaTheme.colors.bad) }
+        }
+        TestWorkspaceSection.Suites -> {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ProjectSelector(
+                    projects = projects,
+                    selectedProjectId = selectedProjectId,
+                    onSelect = { id -> selectedProjectId = id; selectedSuiteId = null; refreshCases() },
+                )
+            MikaButton(stringResource(R.string.test_workspace_new_suite), onClick = { suiteEditorId = ""; suiteEditorName = ""; error = null }, size = ButtonSize.Small)
+            }
+            GroupLabel(stringResource(R.string.test_workspace_suite))
+            val visibleSuites = repository.suites(selectedProjectId)
+            if (visibleSuites.isEmpty()) EmptyNote(stringResource(R.string.test_workspace_no_suites))
+            visibleSuites.forEach { suite ->
+                val suiteCaseCount = repository.search(projectId = selectedProjectId, suiteId = suite.id, includeArchived = true).size
+                GroupCard {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column(Modifier.weight(1f)) {
+                            Text(suite.name, style = MikaType.BodyStrong, color = MikaTheme.colors.ink)
+                            Text(stringResource(R.string.test_workspace_suite_case_count, suiteCaseCount), style = MikaType.Hint, color = MikaTheme.colors.ink3)
+                        }
+                        TextButton(onClick = { suiteEditorId = suite.id; suiteEditorName = suite.name; error = null }) { Text(stringResource(R.string.test_workspace_edit)) }
+                        if (suite.id != TestCaseRepository.DEFAULT_SUITE) TextButton(enabled = suiteCaseCount == 0, onClick = { pendingSuiteDelete = suite.id }) { Text(stringResource(R.string.test_workspace_delete)) }
+                    }
+                }
+            }
+            error?.let { Text(it, Modifier.padding(top = 8.dp), style = MikaType.Caption, color = MikaTheme.colors.bad) }
+        }
+        TestWorkspaceSection.Cases -> {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(Modifier.weight(1f)) {
-                    TextButton(onClick = { projectMenu = true }) {
-                        Text("${stringResource(R.string.test_workspace_project)}: ${projects.firstOrNull { it.id == selectedProjectId }?.name.orEmpty()} ▾")
-                    }
-                    DropdownMenu(expanded = projectMenu, onDismissRequest = { projectMenu = false }) {
-                        projects.forEach { project -> DropdownMenuItem(text = { Text(project.name) }, onClick = {
-                            selectedProjectId = project.id
-                            selectedSuiteId = null
-                            projectMenu = false
-                            refreshCases()
-                        }) }
-                    }
+                    ProjectSelector(
+                        projects = projects,
+                        selectedProjectId = selectedProjectId,
+                        onSelect = { id -> selectedProjectId = id; selectedSuiteId = null; refreshCases() },
+                    )
                 }
                 Column(Modifier.weight(1f)) {
                     TextButton(onClick = { suiteMenu = true }) {
@@ -191,10 +276,6 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
                         }) }
                     }
                 }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { namingKind = "project"; namingValue = "" }) { Text(stringResource(R.string.test_workspace_new_project)) }
-                TextButton(onClick = { namingKind = "suite"; namingValue = "" }) { Text(stringResource(R.string.test_workspace_new_suite)) }
             }
             StateCard(
                 MikaIcons.Apps,
@@ -242,7 +323,7 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
                                         val revision = record.current
                                         val receipt = executor.start(revision.contract, caseId = record.id, caseVersion = revision.version)
                                         repository.recordExecution(record.id, revision.version, receipt.executionId, receipt.startedAtMs)
-                                        selectedTab = 1
+                                        section = TestWorkspaceSection.History
                                         scope.launch { delay(1_000); runs = runRepository.testRuns() }
                                         error = null
                                     }.onFailure { error = it.message }
@@ -287,7 +368,7 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
                                         runCatching {
                                             val receipt = executor.start(revision.contract, caseId = record.id, caseVersion = revision.version)
                                             repository.recordExecution(record.id, revision.version, receipt.executionId, receipt.startedAtMs)
-                                            selectedTab = 1
+                                            section = TestWorkspaceSection.History
                                             scope.launch { delay(1_000); runs = runRepository.testRuns() }
                                         }.onFailure { error = it.message }
                                     }) { Text(stringResource(R.string.test_workspace_run)) }
@@ -297,7 +378,8 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
                     }
                 }
             }
-        } else {
+        }
+        TestWorkspaceSection.History -> {
             GroupLabel(stringResource(R.string.test_workspace_history))
             if (runs.isEmpty()) EmptyNote(stringResource(R.string.test_workspace_no_runs))
             else runs.forEach { run ->
@@ -358,6 +440,7 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
             error?.let { Text(it, style = MikaType.Caption, color = MikaTheme.colors.bad) }
             MikaButton(stringResource(R.string.test_workspace_refresh), onClick = { runs = runRepository.testRuns() }, modifier = Modifier.fillMaxWidth(), kind = ButtonKind.Secondary, size = ButtonSize.Medium)
         }
+        }
     }
 
     if (editorOpen) {
@@ -409,27 +492,85 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
         )
     }
 
-    namingKind?.let { kind ->
+    if (projectEditorOpen) {
         AlertDialog(
-            onDismissRequest = { namingKind = null },
-            title = { Text(stringResource(if (kind == "project") R.string.test_workspace_new_project else R.string.test_workspace_new_suite)) },
-            text = { OutlinedTextField(namingValue, { namingValue = it }, label = { Text(stringResource(if (kind == "project") R.string.test_workspace_project_name else R.string.test_workspace_suite_name)) }, singleLine = true) },
+            onDismissRequest = { projectEditorOpen = false },
+            title = { Text(stringResource(if (projectEditorId == null) R.string.test_workspace_new_project else R.string.test_workspace_edit_project)) },
+            text = {
+                Column {
+                    OutlinedTextField(projectEditorName, { projectEditorName = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.test_workspace_project_name)) }, singleLine = true)
+                    OutlinedTextField(projectEditorDescription, { projectEditorDescription = it }, Modifier.fillMaxWidth().padding(top = 8.dp), label = { Text(stringResource(R.string.test_workspace_project_description)) }, minLines = 2)
+                    error?.let { Text(it, Modifier.padding(top = 8.dp), style = MikaType.Caption, color = MikaTheme.colors.bad) }
+                }
+            },
             confirmButton = { TextButton(onClick = {
                 runCatching {
-                    if (kind == "project") {
-                        val project = repository.createProject(namingValue)
+                    val id = projectEditorId
+                    if (id == null) {
+                        val project = repository.createProject(projectEditorName, projectEditorDescription)
                         repository.createSuite(project.id, "General")
                         selectedProjectId = project.id
                         selectedSuiteId = null
                     } else {
-                        val suite = repository.createSuite(selectedProjectId, namingValue)
-                        selectedSuiteId = suite.id
+                        repository.renameProject(id, projectEditorName, projectEditorDescription)
                     }
-                    namingKind = null
+                    projectEditorOpen = false
+                    error = null
                     refreshCases()
                 }.onFailure { error = it.message }
-            }) { Text(stringResource(R.string.test_workspace_create)) } },
-            dismissButton = { TextButton(onClick = { namingKind = null }) { Text(stringResource(R.string.test_workspace_cancel)) } },
+            }) { Text(stringResource(R.string.test_workspace_save)) } },
+            dismissButton = { TextButton(onClick = { projectEditorOpen = false }) { Text(stringResource(R.string.test_workspace_cancel)) } },
+        )
+    }
+
+    suiteEditorId?.let { id ->
+        AlertDialog(
+            onDismissRequest = { suiteEditorId = null },
+            title = { Text(stringResource(if (id.isEmpty()) R.string.test_workspace_new_suite else R.string.test_workspace_edit_suite)) },
+            text = {
+                Column {
+                    OutlinedTextField(suiteEditorName, { suiteEditorName = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.test_workspace_suite_name)) }, singleLine = true)
+                    error?.let { Text(it, Modifier.padding(top = 8.dp), style = MikaType.Caption, color = MikaTheme.colors.bad) }
+                }
+            },
+            confirmButton = { TextButton(onClick = {
+                runCatching {
+                    if (id.isEmpty()) repository.createSuite(selectedProjectId, suiteEditorName)
+                    else repository.renameSuite(id, suiteEditorName)
+                    suiteEditorId = null
+                    error = null
+                    refreshCases()
+                }.onFailure { error = it.message }
+            }) { Text(stringResource(R.string.test_workspace_save)) } },
+            dismissButton = { TextButton(onClick = { suiteEditorId = null }) { Text(stringResource(R.string.test_workspace_cancel)) } },
+        )
+    }
+
+    pendingProjectDelete?.let { id ->
+        AlertDialog(
+            onDismissRequest = { pendingProjectDelete = null },
+            title = { Text(stringResource(R.string.test_workspace_delete_project)) },
+            text = { Text(stringResource(R.string.test_workspace_delete_project_note)) },
+            confirmButton = { TextButton(onClick = {
+                runCatching { repository.deleteProject(id) }
+                    .onSuccess { pendingProjectDelete = null; refreshCases(); error = null }
+                    .onFailure { pendingProjectDelete = null; error = it.message }
+            }) { Text(stringResource(R.string.test_workspace_delete)) } },
+            dismissButton = { TextButton(onClick = { pendingProjectDelete = null }) { Text(stringResource(R.string.test_workspace_cancel)) } },
+        )
+    }
+
+    pendingSuiteDelete?.let { id ->
+        AlertDialog(
+            onDismissRequest = { pendingSuiteDelete = null },
+            title = { Text(stringResource(R.string.test_workspace_delete_suite)) },
+            text = { Text(stringResource(R.string.test_workspace_delete_suite_note)) },
+            confirmButton = { TextButton(onClick = {
+                runCatching { repository.deleteSuite(id) }
+                    .onSuccess { pendingSuiteDelete = null; refreshCases(); error = null }
+                    .onFailure { pendingSuiteDelete = null; error = it.message }
+            }) { Text(stringResource(R.string.test_workspace_delete)) } },
+            dismissButton = { TextButton(onClick = { pendingSuiteDelete = null }) { Text(stringResource(R.string.test_workspace_cancel)) } },
         )
     }
 
@@ -462,5 +603,25 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
             confirmButton = { TextButton(onClick = { repository.deleteCase(id); pendingDelete = null; refreshCases() }) { Text(stringResource(R.string.test_workspace_delete)) } },
             dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text(stringResource(R.string.test_workspace_cancel)) } },
         )
+    }
+}
+
+@Composable
+private fun ProjectSelector(
+    projects: List<TestCaseProject>,
+    selectedProjectId: String,
+    onSelect: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    TextButton(onClick = { expanded = true }) {
+        Text("${stringResource(R.string.test_workspace_project)}: ${projects.firstOrNull { it.id == selectedProjectId }?.name.orEmpty()} ▾")
+    }
+    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        projects.forEach { project ->
+            DropdownMenuItem(text = { Text(project.name) }, onClick = {
+                expanded = false
+                onSelect(project.id)
+            })
+        }
     }
 }

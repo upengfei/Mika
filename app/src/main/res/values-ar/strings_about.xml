@@ -4,6 +4,10 @@
     <string name="about_check">التحقق من وجود تحديثات</string>
     <string name="about_check_sub">احصل على الإصدارات الجديدة من GitHub Releases</string>
     <string name="about_check_sub_new">يتوفر إصدار جديد</string>
+    <string name="about_checking_title">جارٍ التحقق من التحديثات</string>
+    <string name="about_checking_body">يتحقق Mika من أحدث إصدار. ستظهر النتيجة هنا عند اكتمال الفحص.</string>
+    <string name="about_up_to_date_body">أنت تستخدم أحدث إصدار متاح من Mika.</string>
+    <string name="about_offline_body">تعذر على Mika الوصول إلى خدمة الإصدارات. تحقق من اتصالك وحاول مجدداً.</string>
     <string name="about_up_to_date">محدّث</string>
     <string name="about_up_to_date_toast">لديك أحدث إصدار</string>
     <string name="about_offline">تعذر الاتصال بـ GitHub</string>

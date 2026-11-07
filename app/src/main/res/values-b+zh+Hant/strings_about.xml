@@ -4,6 +4,10 @@
     <string name="about_check">檢查更新</string>
     <string name="about_check_sub">從 GitHub 釋出頁取得新版本</string>
     <string name="about_check_sub_new">有新版本</string>
+    <string name="about_checking_title">正在檢查更新</string>
+    <string name="about_checking_body">Mika 正在檢查最新版本，檢查完成後會在這裡顯示結果。</string>
+    <string name="about_up_to_date_body">目前使用的已是 Mika 最新版本。</string>
+    <string name="about_offline_body">暫時無法連線至版本服務，請檢查網路後再試一次。</string>
     <string name="about_up_to_date">已是最新</string>
     <string name="about_up_to_date_toast">已是最新版本</string>
     <string name="about_offline">連不上 GitHub</string>

@@ -34,6 +34,16 @@
     <string name="test_workspace_new_project">新規プロジェクト</string>
     <string name="test_workspace_new_suite">新規スイート</string>
     <string name="test_workspace_project_name">プロジェクト名</string>
+    <string name="test_workspace_project_description">説明</string>
+    <string name="test_workspace_edit_project">プロジェクトを編集</string>
+    <string name="test_workspace_edit_suite">スイートを編集</string>
+    <string name="test_workspace_delete_project">プロジェクトを削除</string>
+    <string name="test_workspace_delete_project_note">完全に削除する前に、プロジェクトをアーカイブし、スイートとケースを空にしてください。</string>
+    <string name="test_workspace_delete_suite">スイートを削除</string>
+    <string name="test_workspace_delete_suite_note">ケースが含まれるスイートは削除できません。先にケースを移動または削除してください。</string>
+    <string name="test_workspace_no_projects">この表示にプロジェクトはありません。</string>
+    <string name="test_workspace_no_suites">このプロジェクトにはまだスイートがありません。</string>
+    <string name="test_workspace_suite_case_count">%1$d 件のケース</string>
     <string name="test_workspace_suite_name">スイート名</string>
     <string name="test_workspace_search">ケースを検索</string>
     <string name="test_workspace_create">ケースを作成</string>

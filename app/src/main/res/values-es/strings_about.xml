@@ -4,6 +4,10 @@
     <string name="about_check">Buscar actualizaciones</string>
     <string name="about_check_sub">Obtén nuevas versiones desde GitHub Releases</string>
     <string name="about_check_sub_new">Hay una versión nueva</string>
+    <string name="about_checking_title">Buscando actualizaciones</string>
+    <string name="about_checking_body">Mika está comprobando la última versión. El resultado aparecerá aquí cuando termine.</string>
+    <string name="about_up_to_date_body">Estás usando la última versión disponible de Mika.</string>
+    <string name="about_offline_body">Mika no pudo acceder al servicio de versiones. Comprueba la conexión e inténtalo de nuevo.</string>
     <string name="about_up_to_date">Al día</string>
     <string name="about_up_to_date_toast">Tienes la última versión</string>
     <string name="about_offline">No se puede acceder a GitHub</string>

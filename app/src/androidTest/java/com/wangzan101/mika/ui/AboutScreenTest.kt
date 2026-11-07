@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.mutableStateOf
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import android.content.ClipboardManager
@@ -148,6 +149,28 @@ class AboutScreenTest {
     fun checkingShowsSpinner() {
         about(UpdateState(status = CheckStatus.Checking))
         compose.onNodeWithTag("update-spinner").assertExists()
+    }
+
+    @Test
+    fun checkingRowOpensProgressAndShowsCompletedResult() {
+        val calls = Calls()
+        val state = mutableStateOf(UpdateState(status = CheckStatus.Checking))
+        compose.setContent {
+            MikaTheme {
+                AboutScreen(
+                    versionName = "0.1.0", build = "abc1234", beta = true, update = state.value,
+                    issueUrl = "issue://prefilled", onCheck = { calls.checks++ }, onOpenUrl = { calls.urls += it },
+                    onOpenLicense = { calls.licenses++ }, onBack = {},
+                )
+            }
+        }
+
+        compose.onNodeWithText("检查更新").performClick()
+        compose.onNodeWithText(AboutCopy.CHECKING_TITLE).assertIsDisplayed()
+        assertEquals(0, calls.checks)
+
+        state.value = UpdateState(latest = r020.copy(version = "0.1.0"), status = CheckStatus.Done, manualRounds = 1)
+        compose.onNodeWithText(AboutCopy.UP_TO_DATE_BODY).assertIsDisplayed()
     }
 
     @Test

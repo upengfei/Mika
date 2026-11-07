@@ -34,6 +34,16 @@
     <string name="test_workspace_new_project">Novo projeto</string>
     <string name="test_workspace_new_suite">Nova suíte</string>
     <string name="test_workspace_project_name">Nome do projeto</string>
+    <string name="test_workspace_project_description">Descrição</string>
+    <string name="test_workspace_edit_project">Editar projeto</string>
+    <string name="test_workspace_edit_suite">Editar suíte</string>
+    <string name="test_workspace_delete_project">Excluir projeto</string>
+    <string name="test_workspace_delete_project_note">Arquive o projeto e esvazie as suítes e os casos antes de excluí-lo permanentemente.</string>
+    <string name="test_workspace_delete_suite">Excluir suíte</string>
+    <string name="test_workspace_delete_suite_note">Não é possível excluir uma suíte com casos. Mova ou exclua os casos primeiro.</string>
+    <string name="test_workspace_no_projects">Não há projetos nesta visualização.</string>
+    <string name="test_workspace_no_suites">Este projeto ainda não tem suítes.</string>
+    <string name="test_workspace_suite_case_count">%1$d casos</string>
     <string name="test_workspace_suite_name">Nome da suíte</string>
     <string name="test_workspace_search">Buscar casos</string>
     <string name="test_workspace_create">Criar caso</string>

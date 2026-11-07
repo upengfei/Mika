@@ -1,7 +1,6 @@
 package com.wangzan101.mika.ui
 
 import androidx.compose.ui.res.stringResource
-import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -37,7 +36,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
@@ -64,7 +62,7 @@ import com.wangzan101.mika.ui.theme.MikaTheme
 import com.wangzan101.mika.ui.theme.MikaType
 
 /** 关于页上点开的底部面板。 */
-private enum class AboutSheet { Update, Changelog, Feedback, Diagnostics }
+private enum class AboutSheet { Update, Checking, CheckResult, Changelog, Feedback, Diagnostics }
 
 /**
  * 关于 Mika:顶上图标、名字、一句话介绍、版本(Beta 标记、构建编号);下面是检查更新与更新记录、
@@ -86,19 +84,13 @@ fun AboutScreen(
     diagnostics: () -> String = { "" },
 ) {
     val c = MikaTheme.colors
-    val context = LocalContext.current
     var sheet by rememberSaveable { mutableStateOf<AboutSheet?>(null) }
-    // 点了「检查更新」后等这一轮结果:有新版直接弹出说明,没有就提示一句
+    // 手动检查的结果保持在页面上，避免用户看不到检查是否完成。
     var waitingRound by remember { mutableIntStateOf(-1) }
     LaunchedEffect(update.manualRounds) {
         if (waitingRound >= 0 && update.manualRounds > waitingRound) {
             waitingRound = -1
-            when {
-                update.update != null -> sheet = AboutSheet.Update
-                update.status == CheckStatus.Failed ->
-                    Toast.makeText(context, AboutCopy.OFFLINE_TOAST, Toast.LENGTH_SHORT).show()
-                else -> Toast.makeText(context, AboutCopy.UP_TO_DATE_TOAST, Toast.LENGTH_SHORT).show()
-            }
+            sheet = if (update.update != null) AboutSheet.Update else AboutSheet.CheckResult
         }
     }
     PageScaffold(AboutCopy.TITLE, onBack) {
@@ -110,8 +102,12 @@ fun AboutScreen(
                 MikaIcons.Refresh, AboutCopy.CHECK, if (update.hasUpdate) AboutCopy.CHECK_SUB_NEW else AboutCopy.CHECK_SUB, first = true,
                 onClick = {
                     if (update.hasUpdate) sheet = AboutSheet.Update
-                    else if (update.status != CheckStatus.Checking) {
+                    else if (update.status == CheckStatus.Checking) {
                         waitingRound = update.manualRounds
+                        sheet = AboutSheet.Checking
+                    } else {
+                        waitingRound = update.manualRounds
+                        sheet = AboutSheet.Checking
                         onCheck()
                     }
                 },
@@ -158,6 +154,12 @@ fun AboutScreen(
         AboutSheet.Update -> update.update?.let { r ->
             UpdateSheet(r, versionName, beta, onOpenUrl = { close(); onOpenUrl(it) }, onDismiss = close)
         }
+        AboutSheet.Checking -> CheckStatusSheet(AboutCopy.CHECKING_TITLE, AboutCopy.CHECKING_BODY, onDismiss = close)
+        AboutSheet.CheckResult -> CheckStatusSheet(
+            if (update.status == CheckStatus.Failed) AboutCopy.OFFLINE else AboutCopy.UP_TO_DATE,
+            if (update.status == CheckStatus.Failed) AboutCopy.OFFLINE_BODY else AboutCopy.UP_TO_DATE_BODY,
+            onDismiss = close,
+        )
         AboutSheet.Changelog -> ChangelogSheet(update.latest, onOpenAll = { close(); onOpenUrl(MikaLinks.RELEASES) }, onDismiss = close)
         AboutSheet.Feedback -> FeedbackSheet(
             onGitHub = { close(); onOpenUrl(issueUrl) },
@@ -166,6 +168,14 @@ fun AboutScreen(
         )
         AboutSheet.Diagnostics -> DiagnosticsSheet(diagnostics, onDismiss = close)
         null -> Unit
+    }
+}
+
+@Composable
+private fun CheckStatusSheet(title: String, message: String, onDismiss: () -> Unit) {
+    AboutSheetFrame(title, null, "update-check-status", onDismiss) {
+        Text(message, Modifier.padding(top = 12.dp), style = MikaType.Body, color = MikaTheme.colors.ink2)
+        MikaButton(AboutCopy.DONE, onDismiss, Modifier.fillMaxWidth().padding(top = 14.dp), kind = ButtonKind.Tonal)
     }
 }
 

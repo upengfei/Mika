@@ -4,6 +4,10 @@
     <string name="about_check">Check for updates</string>
     <string name="about_check_sub">Get new versions from GitHub Releases</string>
     <string name="about_check_sub_new">New version available</string>
+    <string name="about_checking_title">Checking for updates</string>
+    <string name="about_checking_body">Mika is checking the latest release. This panel will show the result when the check finishes.</string>
+    <string name="about_up_to_date_body">You are using the latest available version of Mika.</string>
+    <string name="about_offline_body">Mika could not reach the release service. Check your connection and try again.</string>
     <string name="about_up_to_date">Up to date</string>
     <string name="about_up_to_date_toast">You’re on the latest version</string>
     <string name="about_offline">Can’t reach GitHub</string>

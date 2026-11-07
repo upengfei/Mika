@@ -34,6 +34,16 @@
     <string name="test_workspace_new_project">Proyek baru</string>
     <string name="test_workspace_new_suite">Suite baru</string>
     <string name="test_workspace_project_name">Nama proyek</string>
+    <string name="test_workspace_project_description">Deskripsi</string>
+    <string name="test_workspace_edit_project">Edit proyek</string>
+    <string name="test_workspace_edit_suite">Edit suite</string>
+    <string name="test_workspace_delete_project">Hapus proyek</string>
+    <string name="test_workspace_delete_project_note">Arsipkan proyek dan kosongkan suite serta kasus sebelum menghapusnya secara permanen.</string>
+    <string name="test_workspace_delete_suite">Hapus suite</string>
+    <string name="test_workspace_delete_suite_note">Suite yang berisi kasus tidak dapat dihapus. Pindahkan atau hapus kasus terlebih dahulu.</string>
+    <string name="test_workspace_no_projects">Tidak ada proyek pada tampilan ini.</string>
+    <string name="test_workspace_no_suites">Proyek ini belum memiliki suite.</string>
+    <string name="test_workspace_suite_case_count">%1$d kasus</string>
     <string name="test_workspace_suite_name">Nama suite</string>
     <string name="test_workspace_search">Cari kasus</string>
     <string name="test_workspace_create">Buat kasus</string>

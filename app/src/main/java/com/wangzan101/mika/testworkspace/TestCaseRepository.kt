@@ -10,7 +10,13 @@ import java.io.File
 import java.util.UUID
 
 @Serializable
-data class TestCaseProject(val id: String, val name: String, val createdAtMs: Long)
+data class TestCaseProject(
+    val id: String,
+    val name: String,
+    val createdAtMs: Long,
+    val description: String = "",
+    val archived: Boolean = false,
+)
 
 @Serializable
 data class TestCaseSuite(val id: String, val projectId: String, val name: String, val createdAtMs: Long)
@@ -78,7 +84,9 @@ class TestCaseRepository(
         persist()
     }
 
-    @Synchronized fun projects(): List<TestCaseProject> = database.projects
+    @Synchronized fun projects(includeArchived: Boolean = false): List<TestCaseProject> =
+        database.projects.filter { includeArchived || !it.archived }
+    @Synchronized fun project(id: String): TestCaseProject? = database.projects.firstOrNull { it.id == id }
     @Synchronized fun suites(projectId: String): List<TestCaseSuite> = database.suites.filter { it.projectId == projectId }
     @Synchronized fun case(id: String): ManagedTestCase? = database.cases.firstOrNull { it.id == id }
     @Synchronized fun executions(caseId: String? = null): List<TestCaseExecutionSnapshot> =
@@ -95,6 +103,7 @@ class TestCaseRepository(
     ): List<ManagedTestCase> = database.cases.asSequence()
         .filter { projectId == null || it.projectId == projectId }
         .filter { suiteId == null || it.suiteId == suiteId }
+        .filter { includeArchived || database.projects.none { project -> project.id == it.projectId && project.archived } }
         .filter { includeArchived || !it.archived }
         .filter { label.isNullOrBlank() || label in it.labels }
         .filter { query.isBlank() || it.current.contract.name.contains(query, true) || it.current.contract.command.contains(query, true) || it.labels.any { tag -> tag.contains(query, true) } }
@@ -102,20 +111,31 @@ class TestCaseRepository(
         .toList()
 
     @Synchronized
-    fun createProject(name: String): TestCaseProject {
+    fun createProject(name: String, description: String = ""): TestCaseProject {
         require(name.isNotBlank()) { "project name must not be blank" }
         require(database.projects.none { it.name.equals(name.trim(), true) }) { "project already exists" }
-        val project = TestCaseProject(uniqueId("project"), name.trim(), clock())
+        val project = TestCaseProject(uniqueId("project"), name.trim(), clock(), description.trim())
         database = database.copy(projects = database.projects + project)
         persist()
         return project
     }
 
     @Synchronized
-    fun renameProject(projectId: String, name: String): TestCaseProject {
+    fun renameProject(projectId: String, name: String, description: String? = null): TestCaseProject {
         require(name.isNotBlank()) { "project name must not be blank" }
         require(database.projects.none { it.id != projectId && it.name.equals(name.trim(), true) }) { "project already exists" }
-        val updated = requireNotNull(database.projects.firstOrNull { it.id == projectId }) { "project does not exist" }.copy(name = name.trim())
+        val old = requireNotNull(database.projects.firstOrNull { it.id == projectId }) { "project does not exist" }
+        val updated = old.copy(name = name.trim(), description = description?.trim() ?: old.description)
+        database = database.copy(projects = database.projects.map { if (it.id == projectId) updated else it })
+        persist()
+        return updated
+    }
+
+    @Synchronized
+    fun archiveProject(projectId: String, archived: Boolean): TestCaseProject {
+        require(projectId != DEFAULT_PROJECT) { "the default project cannot be archived" }
+        val old = requireNotNull(database.projects.firstOrNull { it.id == projectId }) { "project does not exist" }
+        val updated = old.copy(archived = archived)
         database = database.copy(projects = database.projects.map { if (it.id == projectId) updated else it })
         persist()
         return updated
@@ -124,9 +144,11 @@ class TestCaseRepository(
     @Synchronized
     fun deleteProject(projectId: String): Boolean {
         require(projectId != DEFAULT_PROJECT) { "the default project cannot be deleted" }
-        if (database.cases.any { it.projectId == projectId }) error("move or delete project cases first")
+        if (database.cases.any { it.projectId == projectId } || database.suites.any { it.projectId == projectId }) {
+            error("move or delete project suites and cases first")
+        }
         if (database.projects.none { it.id == projectId }) return false
-        database = database.copy(projects = database.projects.filterNot { it.id == projectId }, suites = database.suites.filterNot { it.projectId == projectId })
+        database = database.copy(projects = database.projects.filterNot { it.id == projectId })
         persist()
         return true
     }

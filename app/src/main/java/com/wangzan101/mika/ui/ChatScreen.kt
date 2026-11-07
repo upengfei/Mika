@@ -219,6 +219,14 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
+    LaunchedEffect(ui.conversationId) {
+        if (draftConversationId != ui.conversationId) {
+            draftConversationId?.let { conversationDrafts = conversationDrafts + (it to input) }
+            input = ui.conversationId?.let { conversationDrafts[it].orEmpty() }.orEmpty()
+            draftConversationId = ui.conversationId
+        }
+    }
+
     // 只有原本跟着最新消息时才继续跟随。这个状态与列表位置一起跨页面保存。
     var followingTail by rememberSaveable { mutableStateOf(true) }
     var previousScrollMarker by rememberSaveable { mutableStateOf<String?>(null) }
@@ -355,7 +363,13 @@ fun ChatScreen(
                 left = MikaIcons.Menu, leftLabel = stringResource(R.string.chat_menu), onLeft = onOpenDrawer,
                 // 别的对话里还有任务在跑(并行时):菜单上一个小圆点,侧栏「进行中」里能切过去
                 leftBadge = others.isNotEmpty(),
-                right = { BarIconButton(MikaIcons.New, stringResource(R.string.chat_new), { vm.newConversation() }, enabled = vm.canSwitch()) },
+                right = { BarIconButton(MikaIcons.New, stringResource(R.string.chat_new), {
+                    ui.conversationId?.let { conversationDrafts = conversationDrafts + (it to input) }
+                    draftConversationId = null
+                    vm.newConversation()
+                    input = ""
+                    editRequest++
+                }, enabled = vm.canSwitch()) },
                 subtitle = sub?.first,
                 subtitleColor = when (sub?.second) {
                     ChatCopy.Tone.Accent -> c.accent

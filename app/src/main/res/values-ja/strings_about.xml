@@ -4,6 +4,10 @@
     <string name="about_check">アップデートを確認</string>
     <string name="about_check_sub">GitHub Releases から新しいバージョンを入手</string>
     <string name="about_check_sub_new">新しいバージョンがあります</string>
+    <string name="about_checking_title">更新を確認中</string>
+    <string name="about_checking_body">Mika が最新リリースを確認しています。完了するとここに結果が表示されます。</string>
+    <string name="about_up_to_date_body">Mika の最新バージョンを使用しています。</string>
+    <string name="about_offline_body">リリース情報に接続できません。通信環境を確認して再試行してください。</string>
     <string name="about_up_to_date">最新です</string>
     <string name="about_up_to_date_toast">最新バージョンです</string>
     <string name="about_offline">GitHub に接続できません</string>
