@@ -28,9 +28,9 @@ class RouteMatcher(private val model: ChatModel, val store: RouteStore, private 
 
     fun candidates(goal: String, limit: Int = 5): List<Route> {
         val apps = knowledge?.matchTask(goal, Int.MAX_VALUE)?.flatMap { it.packages }?.toSet().orEmpty()
-        val g = bigrams(goal)
+        val g = bigrams(normalizeTestExecutionId(goal))
         return store.all().filter { !it.disabled }
-            .map { it to jaccard(g, bigrams(SLOT.replace(it.template, "\u0000"))) }
+            .map { it to jaccard(g, bigrams(SLOT.replace(normalizeTestExecutionId(it.template), "\u0000"))) }
             .filter { (r, sim) -> sim >= MIN_SIMILARITY || r.packages.any(apps::contains) }
             .sortedByDescending { it.second }
             .take(limit)
@@ -56,6 +56,9 @@ class RouteMatcher(private val model: ChatModel, val store: RouteStore, private 
         const val TIMEOUT_MS = 20_000L
         private val SLOT = Regex("\\{\\d+\\}")
         private val SLOT_N = Regex("\\{(\\d+)\\}")
+        private val TEST_EXECUTION_ID = Regex("(?m)^Test execution id: [a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\\s*$", RegexOption.IGNORE_CASE)
+
+        private fun normalizeTestExecutionId(task: String): String = TEST_EXECUTION_ID.replace(task, "").trimEnd()
 
         private fun squash(s: String) = s.filterNot { it.isWhitespace() }
 
@@ -82,7 +85,7 @@ class RouteMatcher(private val model: ChatModel, val store: RouteStore, private 
             if (slots.any { it.isBlank() || occurrences(goal, it) != 1 }) return null
             var unknown = false
             val filled = SLOT_N.replace(route.template) { m -> slots.getOrNull(m.groupValues[1].toInt() - 1) ?: run { unknown = true; "" } }
-            if (unknown || squash(filled) != squash(goal)) return null
+            if (unknown || squash(normalizeTestExecutionId(filled)) != squash(normalizeTestExecutionId(goal))) return null
             return RouteChoice(route, slots)
         }
 

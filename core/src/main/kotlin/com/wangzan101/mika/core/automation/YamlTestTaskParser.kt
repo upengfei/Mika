@@ -1,5 +1,7 @@
 package com.wangzan101.mika.core.automation
 
+import kotlinx.serialization.json.Json
+
 /** A deliberately small YAML reader for the task contract; it accepts mappings, sequences and scalar values. */
 internal object YamlTestTaskParser {
     private data class Item(val indent: Int, val text: String)
@@ -8,7 +10,7 @@ internal object YamlTestTaskParser {
         val items = input.lineSequence()
             .map { it.replace("\t", "  ") }
             .mapNotNull { raw ->
-                val withoutComment = raw.substringBefore(" #").trimEnd()
+                val withoutComment = stripComment(raw).trimEnd()
                 if (withoutComment.isBlank() || withoutComment.trimStart().startsWith("#") || withoutComment.trim() == "---") null
                 else Item(withoutComment.indexOfFirst { !it.isWhitespace() }.coerceAtLeast(0), withoutComment.trim())
             }.toList()
@@ -91,10 +93,32 @@ internal object YamlTestTaskParser {
         return line.substring(0, i).trim() to line.substring(i + 1).trim()
     }
 
+    private fun stripComment(line: String): String {
+        var quote: Char? = null
+        var escaped = false
+        var index = 0
+        while (index < line.length) {
+            val char = line[index]
+            if (escaped) escaped = false
+            else if (quote == '"' && char == '\\') escaped = true
+            else if (quote != null && char == quote) {
+                if (quote == '\'' && line.getOrNull(index + 1) == '\'') index++ else quote = null
+            } else if (quote == null && (char == '"' || char == '\'')) quote = char
+            else if (quote == null && char == '#' && (index == 0 || line[index - 1].isWhitespace())) {
+                return line.substring(0, index)
+            }
+            index++
+        }
+        return line
+    }
+
     private fun scalar(value: String): String {
         val v = value.trim()
-        return if (v.length >= 2 && ((v.first() == '"' && v.last() == '"') || (v.first() == '\'' && v.last() == '\''))) {
-            v.substring(1, v.length - 1)
-        } else v
+        if (v.length < 2) return v
+        return when {
+            v.first() == '"' && v.last() == '"' -> Json.decodeFromString<String>(v)
+            v.first() == '\'' && v.last() == '\'' -> v.substring(1, v.length - 1).replace("''", "'")
+            else -> v
+        }
     }
 }

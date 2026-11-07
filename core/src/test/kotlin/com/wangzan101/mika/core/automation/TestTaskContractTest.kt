@@ -62,6 +62,37 @@ class TestTaskContractTest {
         assertTrue(TestTaskContracts.validate(contract).isEmpty())
     }
 
+    @Test fun keepsHashMarkersInsideQuotedYamlScalars() {
+        val contract = TestTaskContracts.parse(
+            """
+            id: marker-test
+            command: "Find text # marker"
+            modelPolicy:
+              model: fixed-model
+              promptVersion: prompt-7
+            """.trimIndent(),
+            TestTaskFormat.YAML,
+        )
+
+        assertEquals("Find text # marker", contract.command)
+    }
+
+    @Test fun exportedJsonAndYamlRoundTripTheContract() {
+        val contract = TestTaskContract(
+            id = "checkout",
+            name = "Checkout: sandbox",
+            command = "Pay for the \"blue\" item",
+            steps = listOf(TestStepSpec("open", "Open checkout: page")),
+            assertions = listOf(TestAssertionSpec("paid", TestAssertionKind.HARD, "Order paid", required = true)),
+            modelPolicy = TestModelPolicy("fixed-model", "prompt-1"),
+        )
+
+        listOf(TestTaskFormat.JSON, TestTaskFormat.YAML).forEach { format ->
+            val output = TestTaskContracts.encode(contract, format)
+            assertEquals(contract, TestTaskContracts.parse(output, format))
+        }
+    }
+
     @Test fun rejectsDuplicateAssertionIdsAndMissingCommand() {
         val contract = TestTaskContract(
             id = "bad",

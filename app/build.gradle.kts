@@ -9,6 +9,14 @@ plugins {
 val gitHash: String = runCatching {
     providers.exec { commandLine("git", "rev-parse", "--short=7", "HEAD") }.standardOutput.asText.get().trim()
 }.getOrNull()?.takeIf { it.isNotEmpty() } ?: "dev"
+val mpReleaseRepository = providers.gradleProperty("mpReleaseRepository").orNull.orEmpty().trimEnd('/')
+require(mpReleaseRepository.isEmpty() || Regex("https://github\\.com/[^/]+/[^/]+").matches(mpReleaseRepository)) {
+    "mpReleaseRepository must be an HTTPS GitHub repository URL, for example https://github.com/owner/repository"
+}
+val mpReleaseApi = mpReleaseRepository.takeIf { it.isNotEmpty() }
+    ?.removePrefix("https://github.com/")
+    ?.let { "https://api.github.com/repos/$it/releases/latest" }
+    .orEmpty()
 
 android {
     namespace = "com.wangzan101.mika"
@@ -22,6 +30,8 @@ android {
         versionName = "0.1.38"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "GIT_HASH", "\"$gitHash\"")
+        buildConfigField("String", "UPDATE_RELEASE_REPOSITORY", "\"https://github.com/wangzan101/Mika\"")
+        buildConfigField("String", "UPDATE_RELEASE_API", "\"https://api.github.com/repos/wangzan101/Mika/releases/latest\"")
         // 关于页版本号后的 Beta 标记;出正式版时改成 false
         buildConfigField("boolean", "BETA", "true")
     }
@@ -73,6 +83,8 @@ android {
             applicationIdSuffix = ".test"
             versionNameSuffix = "-test"
             resValue("string", "app_name", "MP工作台")
+            buildConfigField("String", "UPDATE_RELEASE_REPOSITORY", "\"$mpReleaseRepository\"")
+            buildConfigField("String", "UPDATE_RELEASE_API", "\"$mpReleaseApi\"")
         }
     }
 

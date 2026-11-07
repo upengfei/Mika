@@ -21,13 +21,17 @@ class ApkRejected(val reason: Reason) : Exception(reason.name) {
  * 所以下载完的文件一律再验:大小与 SHA-256(发布元数据给了才验)、包名、版本号、签名证书。
  */
 internal object ApkIntegrity {
-    private val official = "${MikaLinks.RELEASES}/download/".toHttpUrl()
+    fun requireOfficialUrl(url: String) = requireReleaseUrl(url, MikaLinks.REPO)
 
-    fun requireOfficialUrl(url: String) {
+    fun requireReleaseUrl(url: String, repository: String) {
+        val repo = repository.toHttpUrl()
         val parsed = url.toHttpUrl()
-        require(parsed.isHttps && parsed.host == official.host && parsed.port == 443)
+        require(repo.isHttps && repo.host == "github.com" && repo.port == 443)
+        require(repo.username.isEmpty() && repo.password.isEmpty() && repo.query == null && repo.fragment == null)
+        require(repo.pathSegments.size == 2 && repo.pathSegments.all { it.isNotBlank() })
+        require(parsed.isHttps && parsed.host == repo.host && parsed.port == repo.port)
         require(parsed.username.isEmpty() && parsed.password.isEmpty())
-        require(parsed.encodedPath.startsWith(official.encodedPath))
+        require(parsed.encodedPath.startsWith("${repo.encodedPath.trimEnd('/')}/releases/download/"))
         require(parsed.encodedPath.endsWith(".apk", ignoreCase = true))
     }
 

@@ -52,10 +52,11 @@ class RunStore internal constructor(
 
     init { require(keep > 0) { "keep must be positive" } }
 
-    private val root = File(filesDir, "runs")
+    private val appFiles = filesDir
+    private val root = File(appFiles, "runs")
 
     /** 每次运行的小结;运行记录关上时由写线程记一份(见 [RunHandle])。 */
-    val metrics = RunMetricsStore(File(filesDir, RunMetricsStore.FILE_NAME))
+    val metrics = RunMetricsStore(File(appFiles, RunMetricsStore.FILE_NAME))
 
     fun open(goal: String): RunHandle {
         val start = clock()
@@ -64,7 +65,10 @@ class RunStore internal constructor(
         val id = "$stamp-$suffix"
         val dir = File(root, id)
         dir.mkdirs()
-        val handle = RunHandle(id, dir, RunSummary(id = id, goal = Redactor.text(goal), startedAtMs = start), encode, metrics::append)
+        val handle = RunHandle(
+            id, dir, RunSummary(id = id, goal = Redactor.text(goal), startedAtMs = start), encode, metrics::append,
+            archive = if (isTestRun(goal)) ({ archiveTestRun(id, dir) }) else null,
+        )
         prune()
         return handle
     }
@@ -151,6 +155,12 @@ class RunStore internal constructor(
             .getOrDefault(false)
     }
 
+    private fun archiveTestRun(runId: String, source: File) {
+        val archive = File(appFiles, "test-reports/$runId")
+        source.copyRecursively(archive, overwrite = true)
+        check(File(archive, RUN_JSON).isFile) { "could not archive test run $runId" }
+    }
+
     /** 只接受本目录下真实存在的运行,防止拼出别的路径。 */
     private fun dirOf(runId: String): File? =
         File(root, runId).takeIf { ID_RE.matches(runId) && it.isDirectory }
@@ -178,6 +188,8 @@ class RunStore internal constructor(
         private const val ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
         private val ID_RE = Regex("""\d{8}-\d{6}-[a-z0-9]{6}""")
 
+        private fun isTestRun(goal: String): Boolean = goal.contains("Test case id:") || goal.contains("Test task id:")
+
         internal fun screenPath(id: Int) = "screens/%04d.jpg".format(Locale.US, id)
     }
 }
@@ -194,6 +206,7 @@ class RunHandle internal constructor(
     private var summary: RunSummary,
     private val encode: (ByteArray) -> ByteArray?,
     private val finished: (RunMetrics) -> Unit = {},
+    private val archive: (() -> Unit)? = null,
 ) : RunSink, Closeable {
     private val lock = Object()
     private val events = ArrayDeque<RunEvent>()
@@ -252,7 +265,10 @@ class RunHandle internal constructor(
             }
             if (done) {
                 // 小结在锁外写:写的是另一个文件,不挡着别的线程
-                metrics.build()?.let { m -> safely("metrics") { finished(m) } }
+                metrics.build()?.let { m ->
+                    safely("metrics") { finished(m) }
+                    archive?.let { safely("test archive") { it() } }
+                }
                 return
             }
             batch.forEach(::write)

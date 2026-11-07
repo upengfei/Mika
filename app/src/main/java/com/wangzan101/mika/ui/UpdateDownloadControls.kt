@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.wangzan101.mika.R
+import com.wangzan101.mika.BuildConfig
 import com.wangzan101.mika.about.ApkDownloadState
 import com.wangzan101.mika.about.ApkRejected
 import com.wangzan101.mika.about.ApkUpdater
@@ -39,7 +40,7 @@ import kotlinx.coroutines.withContext
 @Composable
 internal fun UpdateDownloadControls(release: ReleaseInfo) {
     val context = LocalContext.current
-    val updater = remember { ApkUpdater(context.applicationContext) }
+    val updater = remember { ApkUpdater(context.applicationContext, releaseRepository = BuildConfig.UPDATE_RELEASE_REPOSITORY) }
     val scope = rememberCoroutineScope()
     var state by remember(release.apkUrl) { mutableStateOf(ApkDownloadState()) }
     var busy by remember { mutableStateOf(false) }

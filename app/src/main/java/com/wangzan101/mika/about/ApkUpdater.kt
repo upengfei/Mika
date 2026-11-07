@@ -29,7 +29,11 @@ data class ApkDownloadState(
  * 文件放在本应用的外部专属目录(别的 App 读写不到),同一时间只留一个;换版本、删除、装好后都清掉。
  * 设了网络代理(设置 › 网络代理)时系统下载服务不走它,改由 Mika 自己经代理在进程里下([ProxiedApkDownload])。
  */
-class ApkUpdater(private val context: Context, private val net: NetProxy = NetProxy.shared) {
+class ApkUpdater(
+    private val context: Context,
+    private val net: NetProxy = NetProxy.shared,
+    private val releaseRepository: String = MikaLinks.REPO,
+) {
     private val manager = context.getSystemService(DownloadManager::class.java)
     private val prefs = context.getSharedPreferences("apk-update", Context.MODE_PRIVATE)
     private val directory: File get() = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
@@ -62,7 +66,7 @@ class ApkUpdater(private val context: Context, private val net: NetProxy = NetPr
 
     fun download(release: ReleaseInfo) {
         val url = requireNotNull(release.apkUrl)
-        ApkIntegrity.requireOfficialUrl(url)
+        ApkIntegrity.requireReleaseUrl(url, releaseRepository)
         if (prefs.getString("url", null) == url && state(release).phase in
             listOf(DownloadPhase.Downloading, DownloadPhase.Paused, DownloadPhase.Ready)) return
         cancel()
@@ -114,7 +118,7 @@ class ApkUpdater(private val context: Context, private val net: NetProxy = NetPr
      */
     fun installIntent(release: ReleaseInfo): Intent {
         check(state(release).phase == DownloadPhase.Ready)
-        ApkIntegrity.requireOfficialUrl(requireNotNull(release.apkUrl))
+        ApkIntegrity.requireReleaseUrl(requireNotNull(release.apkUrl), releaseRepository)
         val target = requireNotNull(file)
         try {
             ApkIntegrity.verify(target, release.apkSize, release.apkDigest)

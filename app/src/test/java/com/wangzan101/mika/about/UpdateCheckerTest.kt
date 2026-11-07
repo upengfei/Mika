@@ -95,6 +95,16 @@ class UpdateCheckerTest {
         assertNull(c.state.value.update)
     }
 
+    @Test
+    fun missingWorkspaceReleaseSourceDoesNotQueryMikaOfficialChannel() = runTest {
+        val checker = UpdateChecker(tmp.root.resolve("workspace-update.json"), "0.1.0", releaseApi = "")
+
+        checker.check(manual = true)
+
+        assertTrue(hits.isEmpty())
+        assertEquals(CheckStatus.Failed, checker.state.value.status)
+    }
+
     /** 自动检查失败不改界面上的状态;每次打开都查,只挡住两分钟内连着来的。 */
     @Test
     fun autoCheckIsSilentAndRunsOnEveryOpenButNotInBursts() = runTest {

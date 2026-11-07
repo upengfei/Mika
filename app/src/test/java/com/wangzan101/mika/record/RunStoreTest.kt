@@ -149,6 +149,25 @@ class RunStoreTest {
         ids.take(5).forEach { assertFalse(tmp.root.resolve("files/runs/$it").exists()) }
     }
 
+    @Test fun testRunEvidenceIsArchivedBeforeRollingStorePrunesIt() {
+        val s = store(keep = 1)
+        val test = s.open("Run checkout\nTest case id: checkout\nTest case version: 2\nTest execution id: 11111111-1111-1111-1111-111111111111")
+        test.event(RunEvent.TaskStarted(clock, "checkout", "model"))
+        test.event(RunEvent.ToolResult(clock + 1, 1, "phone_tap", "{}", false, 9))
+        test.media(9, byteArrayOf(4, 5, 6))
+        test.event(RunEvent.TaskEnded(clock + 2, "failed", "evidence"))
+        test.close()
+        clock += 1_000
+
+        s.open("ordinary run").close()
+
+        val archived = tmp.root.resolve("files/test-reports/${test.runId}")
+        assertTrue(archived.resolve("run.json").isFile)
+        assertTrue(archived.resolve("events.jsonl").isFile)
+        assertArrayEquals(byteArrayOf(4, 5, 6, 9), archived.resolve("screens/0009.jpg").readBytes())
+        assertFalse(s.list().any { it.id == test.runId })
+    }
+
     @Test fun eventsRoundTrip() {
         val s = store()
         val h = s.open("g")

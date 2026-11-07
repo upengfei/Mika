@@ -38,6 +38,18 @@ class RouteMatcherTest {
         assertEquals(1, m.requests.size)
     }
 
+    @Test fun testExecutionIdsDoNotPreventReusingTheSameTestRoute() = runTest {
+        val previousGoal = "打开商品并检查状态\nTest case id: checkout\nTest case version: 2\nTest execution id: 11111111-1111-1111-1111-111111111111"
+        val currentGoal = "打开商品并检查状态\nTest case id: checkout\nTest case version: 2\nTest execution id: 22222222-2222-2222-2222-222222222222"
+        val route = memo.copy(id = "test-checkout", template = previousGoal, slots = 0)
+        val model = FakeModel(text("""{"route": 1, "slots": []}"""))
+
+        val choice = RouteMatcher(model, MemRoutes(route), null).choose(currentGoal)
+
+        assertEquals(route, choice?.route)
+        assertEquals(1, model.requests.size)
+    }
+
     @Test fun slotNotInGoalRejected() = runTest {
         val m = FakeModel(text("""{"route": 1, "slots": ["明天开会"]}"""))
         assertNull(RouteMatcher(m, MemRoutes(memo), null).choose(goal))

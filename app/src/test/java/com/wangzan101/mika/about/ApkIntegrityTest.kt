@@ -13,6 +13,12 @@ class ApkIntegrityTest {
         ApkIntegrity.requireOfficialUrl("https://github.com/wangzan101/Mika/releases/download/v0.2.0/Mika.apk")
     }
 
+    @Test fun releaseApkMustMatchConfiguredRepository() {
+        ApkIntegrity.requireReleaseUrl("https://github.com/acme/MP/releases/download/v1.2.0/MP.apk", "https://github.com/acme/MP")
+        rejects { ApkIntegrity.requireReleaseUrl("https://github.com/wangzan101/Mika/releases/download/v0.2.0/Mika.apk", "https://github.com/acme/MP") }
+        rejects { ApkIntegrity.requireReleaseUrl("https://github.com.evil.test/acme/MP/releases/download/v1/MP.apk", "https://github.com/acme/MP") }
+    }
+
     @Test fun rejectsUntrustedDownloads() {
         for (url in listOf(
             "http://github.com/wangzan101/Mika/releases/download/v0.2.0/Mika.apk",

@@ -64,6 +64,7 @@ object TestTaskContracts {
     private val json = kotlinx.serialization.json.Json {
         ignoreUnknownKeys = false
         explicitNulls = false
+        prettyPrint = true
     }
     private val idPattern = Regex("^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
@@ -72,6 +73,31 @@ object TestTaskContracts {
         return when (actual) {
             TestTaskFormat.JSON -> json.decodeFromString(TestTaskContract.serializer(), text)
             TestTaskFormat.YAML -> YamlTestTaskParser.parse(text)
+        }
+    }
+
+    fun encode(contract: TestTaskContract, format: TestTaskFormat): String = when (format) {
+        TestTaskFormat.JSON -> json.encodeToString(TestTaskContract.serializer(), contract)
+        TestTaskFormat.YAML -> buildString {
+            fun quote(value: String) = kotlinx.serialization.json.JsonPrimitive(value).toString()
+            appendLine("schemaVersion: ${contract.schemaVersion}")
+            appendLine("id: ${quote(contract.id)}")
+            appendLine("name: ${quote(contract.name)}")
+            appendLine("command: ${quote(contract.command)}")
+            contract.targetApp?.let { appendLine("targetApp: ${quote(it)}") }
+            if (contract.steps.isNotEmpty()) {
+                appendLine("steps:")
+                contract.steps.forEach { appendLine("  - id: ${quote(it.id)}\n    instruction: ${quote(it.instruction)}") }
+            }
+            if (contract.assertions.isNotEmpty()) {
+                appendLine("assertions:")
+                contract.assertions.forEach {
+                    appendLine("  - id: ${quote(it.id)}\n    kind: ${it.kind.name.lowercase()}\n    description: ${quote(it.description)}\n    required: ${it.required}")
+                }
+            }
+            appendLine("modelPolicy:\n  model: ${quote(contract.modelPolicy.model)}\n  promptVersion: ${quote(contract.modelPolicy.promptVersion)}")
+            contract.sandbox?.let { appendLine("sandbox:\n  name: ${quote(it.name)}\n  cleanup: ${quote(it.cleanup)}") }
+            contract.schedule?.intervalMinutes?.let { appendLine("schedule:\n  intervalMinutes: $it") }
         }
     }
 
