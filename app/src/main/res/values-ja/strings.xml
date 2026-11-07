@@ -1,6 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="a11y_service_description">このシステム権限により、Mika は画面に表示されている内容を読み取って操作できます。Mika は、頼まれたタスクを自分の仮想画面でこなすときにだけ使い、メイン画面で操作するのは、そこでタスクを任されたときだけです。</string>
+    <string name="drawer_test_workspace">テストワークスペース</string>
+    <string name="test_workspace_intro">バージョン管理されたテストタスクを作成またはインポートします。実行データは端末に保存されます。</string>
+    <string name="test_workspace_command">テストコマンド</string>
+    <string name="test_workspace_save">タスクを保存</string>
+    <string name="test_workspace_import">YAML/JSONをインポート</string>
+    <string name="test_workspace_command_required">テストコマンドを入力してください。</string>
+    <string name="test_workspace_import_failed">タスクファイルをインポートできませんでした。</string>
+    <string name="test_workspace_started">実行を開始しました</string>
+    <string name="test_workspace_saved">保存済みタスク</string>
+    <string name="test_workspace_empty">保存済みタスクはありません。</string>
+    <string name="test_workspace_run">実行</string>
+    <string name="test_workspace_delete">削除</string>
     <string name="channel_attention">あなたの対応が必要</string>
     <string name="takeover_title">あなたの対応が必要</string>
     <string name="takeover_title_reason">対応が必要: %1$s</string>

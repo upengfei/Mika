@@ -1,6 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="a11y_service_description">這項系統權限能讓 Mika 讀取和操作任何螢幕上的內容。Mika 只在它自己的虛擬螢幕上用它來完成你交給它的任務；只有你把主螢幕上的任務交給它時，才會在主螢幕上操作。</string>
+    <string name="drawer_test_workspace">測試工作區</string>
+    <string name="test_workspace_intro">建立或匯入有版本的測試任務。執行記錄會保存在這部裝置上。</string>
+    <string name="test_workspace_command">測試命令</string>
+    <string name="test_workspace_save">儲存任務</string>
+    <string name="test_workspace_import">匯入 YAML/JSON</string>
+    <string name="test_workspace_command_required">請先輸入測試命令。</string>
+    <string name="test_workspace_import_failed">無法匯入此任務檔案。</string>
+    <string name="test_workspace_started">已開始執行</string>
+    <string name="test_workspace_saved">已儲存的任務</string>
+    <string name="test_workspace_empty">目前沒有已儲存的測試任務。</string>
+    <string name="test_workspace_run">執行</string>
+    <string name="test_workspace_delete">刪除</string>
     <string name="channel_attention">需要你處理</string>
     <string name="takeover_title">需要你處理</string>
     <string name="takeover_title_reason">需要你處理:%1$s</string>

@@ -67,6 +67,13 @@ android {
             isProfileable = true
             matchingFallbacks += "release"
         }
+        // Test workspace build: keeps every Mika capability but installs beside the official package.
+        create("workspace") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".test"
+            versionNameSuffix = "-test"
+            resValue("string", "app_name", "Mika Test Workspace")
+        }
     }
 
     buildFeatures {

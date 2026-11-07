@@ -428,6 +428,7 @@ private fun MikaRoot(
                 conversationChanges = ConversationStore.shared(context).changes,
                 conversationTitle = { ConversationStore.shared(context).title(it) },
                 onPlans = { nav.pushFromDrawer(Route.Plans) },
+                onTestWorkspace = { nav.pushFromDrawer(Route.TestWorkspace) },
                 onMemory = { nav.pushFromDrawer(Route.Memory) },
                 onSettings = { nav.pushFromDrawer(Route.Settings) },
                 onBrowser = { nav.pushFromDrawer(Route.Browser) },
@@ -567,6 +568,7 @@ private fun MikaRoot(
                 nav.push(Route.Memory)
             },
         )
+        Route.TestWorkspace -> TestWorkspaceScreen(context, onBack = back)
         Route.Screens -> ScreensScreen(app.taskState, onBack = back, onOpenConversation = {
             app.chat.openConversation(it)
             nav.reset()

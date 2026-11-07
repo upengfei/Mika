@@ -1,6 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="a11y_service_description">يتيح هذا الإذن للنظام لـ Mika قراءة ما يظهر على أي شاشة والتفاعل معه. لا تستخدم Mika هذا الإذن إلا على شاشتها الافتراضية لتنفيذ المهام التي تطلبها منها، ولا تعمل على شاشتك الرئيسية إلا عندما تسند إليها مهمة عليها.</string>
+    <string name="drawer_test_workspace">مساحة الاختبار</string>
+    <string name="test_workspace_intro">أنشئ مهام اختبار ذات إصدارات أو استوردها. تُحفظ عمليات التشغيل على هذا الجهاز.</string>
+    <string name="test_workspace_command">أمر الاختبار</string>
+    <string name="test_workspace_save">حفظ المهمة</string>
+    <string name="test_workspace_import">استيراد YAML/JSON</string>
+    <string name="test_workspace_command_required">أدخل أمر الاختبار أولاً.</string>
+    <string name="test_workspace_import_failed">تعذر استيراد ملف المهمة.</string>
+    <string name="test_workspace_started">بدأ التشغيل</string>
+    <string name="test_workspace_saved">المهام المحفوظة</string>
+    <string name="test_workspace_empty">لا توجد مهام محفوظة.</string>
+    <string name="test_workspace_run">تشغيل</string>
+    <string name="test_workspace_delete">حذف</string>
     <string name="channel_attention">يتطلب انتباهك</string>
     <string name="takeover_title">يتطلب انتباهك</string>
     <string name="takeover_title_reason">يتطلب انتباهك: %1$s</string>

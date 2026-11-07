@@ -1,6 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="a11y_service_description">Mika가 모든 화면의 내용을 읽고 조작할 수 있게 해 주는 시스템 권한이에요. Mika는 맡긴 작업을 처리할 때 자체 가상 화면에서만 이 권한을 사용하고, 메인 화면에서는 그 화면에서 작업을 맡겼을 때만 동작해요.</string>
+    <string name="drawer_test_workspace">테스트 작업 공간</string>
+    <string name="test_workspace_intro">버전이 지정된 테스트 작업을 만들거나 가져옵니다. 실행 기록은 이 기기에 저장됩니다.</string>
+    <string name="test_workspace_command">테스트 명령</string>
+    <string name="test_workspace_save">작업 저장</string>
+    <string name="test_workspace_import">YAML/JSON 가져오기</string>
+    <string name="test_workspace_command_required">테스트 명령을 입력하세요.</string>
+    <string name="test_workspace_import_failed">작업 파일을 가져올 수 없습니다.</string>
+    <string name="test_workspace_started">실행 시작됨</string>
+    <string name="test_workspace_saved">저장된 작업</string>
+    <string name="test_workspace_empty">저장된 테스트 작업이 없습니다.</string>
+    <string name="test_workspace_run">실행</string>
+    <string name="test_workspace_delete">삭제</string>
     <string name="channel_attention">확인 필요</string>
     <string name="takeover_title">확인이 필요해요</string>
     <string name="takeover_title_reason">확인이 필요해요: %1$s</string>

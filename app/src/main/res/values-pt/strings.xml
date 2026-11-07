@@ -1,6 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="a11y_service_description">Esta permissão do sistema permite que o Mika leia e opere o que aparece em qualquer tela. O Mika a usa apenas na tela virtual dele para fazer as tarefas que você pedir, e só age na sua tela principal quando você entrega uma tarefa lá.</string>
+    <string name="drawer_test_workspace">Área de testes</string>
+    <string name="test_workspace_intro">Crie ou importe tarefas de teste versionadas. As execuções ficam salvas neste dispositivo.</string>
+    <string name="test_workspace_command">Comando de teste</string>
+    <string name="test_workspace_save">Salvar tarefa</string>
+    <string name="test_workspace_import">Importar YAML/JSON</string>
+    <string name="test_workspace_command_required">Digite um comando de teste.</string>
+    <string name="test_workspace_import_failed">Não foi possível importar o arquivo.</string>
+    <string name="test_workspace_started">Execução iniciada</string>
+    <string name="test_workspace_saved">Tarefas salvas</string>
+    <string name="test_workspace_empty">Ainda não há tarefas salvas.</string>
+    <string name="test_workspace_run">Executar</string>
+    <string name="test_workspace_delete">Excluir</string>
     <string name="channel_attention">Precisa de você</string>
     <string name="takeover_title">Precisa de você</string>
     <string name="takeover_title_reason">Precisa de você: %1$s</string>

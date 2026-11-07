@@ -1,5 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="drawer_test_workspace">测试工作区</string>
+    <string name="test_workspace_intro">创建或导入版本化测试任务。运行保存在本机，并复用 Mika 现有任务服务。</string>
+    <string name="test_workspace_command">测试命令</string>
+    <string name="test_workspace_save">保存任务</string>
+    <string name="test_workspace_import">导入 YAML/JSON</string>
+    <string name="test_workspace_command_required">请先输入测试命令。</string>
+    <string name="test_workspace_import_failed">无法导入这个任务文件。</string>
+    <string name="test_workspace_started">运行已开始</string>
+    <string name="test_workspace_saved">已保存任务</string>
+    <string name="test_workspace_empty">还没有保存测试任务。</string>
+    <string name="test_workspace_run">运行</string>
+    <string name="test_workspace_delete">删除</string>
     <string name="a11y_service_description">这项系统权限能让 Mika 读取和操作任何屏幕上的内容。Mika 只在它自己的虚拟屏幕上用它来完成你交给它的任务；只有你把主屏幕上的任务交给它时，才会在主屏幕上操作。</string>
     <string name="channel_attention">需要你处理</string>
     <string name="takeover_title">需要你处理</string>

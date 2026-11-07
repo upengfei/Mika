@@ -207,6 +207,7 @@ fun ChatDrawer(
     canSwitch: Boolean,
     onNew: () -> Unit,
     onPlans: () -> Unit,
+    onTestWorkspace: () -> Unit = {},
     onMemory: () -> Unit,
     onBrowser: () -> Unit,
     onScreens: () -> Unit = {},
@@ -245,6 +246,7 @@ fun ChatDrawer(
         Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
             NavEntry(MikaIcons.New, stringResource(R.string.chat_new), enabled = canSwitch, onClick = onNew)
             NavEntry(MikaIcons.Clock, stringResource(R.string.drawer_plans), onClick = onPlans)
+            NavEntry(MikaIcons.Apps, stringResource(R.string.drawer_test_workspace), onClick = onTestWorkspace)
             NavEntry(MikaIcons.Heart, stringResource(R.string.memory_and_skills), onClick = onMemory)
             NavEntry(MikaIcons.Globe, stringResource(R.string.drawer_browser), onClick = onBrowser)
             // 和上面几项隔开一点:这是把 Mika 整个停下来,不是换一页
@@ -491,6 +493,7 @@ fun ChatWithDrawer(
     /** 对话起好的标题;当前对话还没存进列表时(任务刚开始)也能叫出名字。 */
     conversationTitle: (String) -> String? = { null },
     onPlans: () -> Unit,
+    onTestWorkspace: () -> Unit = {},
     onMemory: () -> Unit,
     onBrowser: () -> Unit,
     onScreens: () -> Unit = {},
@@ -593,6 +596,7 @@ fun ChatWithDrawer(
                     check, sections, canSwitch,
                     onNew = { close { vm.newConversation() } },
                     onPlans = { leave(onPlans) },
+                    onTestWorkspace = { leave(onTestWorkspace) },
                     onMemory = { leave(onMemory) },
                     onSettings = { leave(onSettings) },
                     onBrowser = { leave(onBrowser) },
