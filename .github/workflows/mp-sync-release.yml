@@ -93,5 +93,5 @@ jobs:
           tag="mp-v$mp_version"
           git push origin HEAD:mp-workspace
           gh release create "$tag" app/build/outputs/apk/workspace/app-workspace.apk \
-            --repo upengfei/Mika --title "MP工作台 $mp_version" \
+            --repo upengfei/Mika --target "$(git rev-parse HEAD)" --title "MP工作台 $mp_version" \
             --notes "Built from Mika upstream and verified by unit tests and Android emulator startup smoke test."
