@@ -46,6 +46,13 @@ class UpdateCheckerTest {
         now = { clock },
     )
 
+    private fun mpChecker(current: String = "0.1.0") = UpdateChecker(
+        tmp.root.resolve("mp-update.json"), current,
+        releaseApi = server.url("/api").toString(),
+        releaseTagPrefix = "mp-v",
+        now = { clock },
+    )
+
     private fun release(tag: String) =
         MockResponse().setBody("""{"tag_name":"$tag","name":"Mika $tag","body":"- 新东西","html_url":"https://github.com/wangzan101/Mika/releases/tag/$tag","assets":[]}""")
 
@@ -103,6 +110,21 @@ class UpdateCheckerTest {
 
         assertTrue(hits.isEmpty())
         assertEquals(CheckStatus.Failed, checker.state.value.status)
+    }
+
+    @Test
+    fun workspaceChannelSelectsOnlyMpTaggedRelease() = runTest {
+        github = MockResponse().setBody("""[
+            {"tag_name":"v0.9.0","name":"Mika release","body":"wrong channel","html_url":"https://example.com/mika","assets":[]},
+            {"tag_name":"mp-v0.2.0","name":"MP workspace","body":"workspace update","html_url":"https://example.com/mp","assets":[]}
+        ]""")
+
+        val c = mpChecker()
+        c.check(manual = true)
+
+        assertEquals(CheckStatus.Done, c.state.value.status)
+        assertEquals("0.2.0", c.state.value.update?.version)
+        assertEquals("https://example.com/mp", c.state.value.latest?.pageUrl)
     }
 
     /** 自动检查失败不改界面上的状态;每次打开都查,只挡住两分钟内连着来的。 */

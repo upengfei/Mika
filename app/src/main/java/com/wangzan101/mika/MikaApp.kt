@@ -264,7 +264,8 @@ class MikaApp : Application(), WebOwner, SandboxOwner, TaskEnvironment.Owner, Ph
     val updates: com.wangzan101.mika.about.UpdateChecker by lazy {
         com.wangzan101.mika.about.UpdateChecker(java.io.File(filesDir, "update-v1.json"), BuildConfig.VERSION_NAME,
             releaseApi = BuildConfig.UPDATE_RELEASE_API,
-            deviceAbis = android.os.Build.SUPPORTED_ABIS.toList())
+            deviceAbis = android.os.Build.SUPPORTED_ABIS.toList(),
+            releaseTagPrefix = BuildConfig.UPDATE_RELEASE_TAG_PREFIX)
     }
 
     /** 浮在别的 App 上的悬浮胶囊。 */

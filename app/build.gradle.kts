@@ -15,8 +15,11 @@ require(mpReleaseRepository.isEmpty() || Regex("https://github\\.com/[^/]+/[^/]+
 }
 val mpReleaseApi = mpReleaseRepository.takeIf { it.isNotEmpty() }
     ?.removePrefix("https://github.com/")
-    ?.let { "https://api.github.com/repos/$it/releases/latest" }
+    ?.let { "https://api.github.com/repos/$it/releases?per_page=100" }
     .orEmpty()
+val mpVersionCode = providers.gradleProperty("mpVersionCode").orNull?.toInt()
+    ?: rootProject.file("mp-version-code.txt").readText().trim().toInt()
+val mpKeystorePath = System.getenv("MP_SIGNING_KEYSTORE_FILE")
 
 android {
     namespace = "com.wangzan101.mika"
@@ -32,8 +35,20 @@ android {
         buildConfigField("String", "GIT_HASH", "\"$gitHash\"")
         buildConfigField("String", "UPDATE_RELEASE_REPOSITORY", "\"https://github.com/wangzan101/Mika\"")
         buildConfigField("String", "UPDATE_RELEASE_API", "\"https://api.github.com/repos/wangzan101/Mika/releases/latest\"")
+        buildConfigField("String", "UPDATE_RELEASE_TAG_PREFIX", "\"\"")
         // 关于页版本号后的 Beta 标记;出正式版时改成 false
         buildConfigField("boolean", "BETA", "true")
+    }
+
+    signingConfigs {
+        create("mpRelease") {
+            if (!mpKeystorePath.isNullOrBlank()) {
+                storeFile = file(mpKeystorePath)
+                storePassword = System.getenv("MP_SIGNING_STORE_PASSWORD")
+                keyAlias = System.getenv("MP_SIGNING_KEY_ALIAS")
+                keyPassword = System.getenv("MP_SIGNING_KEY_PASSWORD")
+            }
+        }
     }
 
     // 沙箱程序只有 arm64 版本(jniLibs/arm64-v8a);APK 不限 ABI,别的设备照常安装、显示「此设备不支持沙箱」。
@@ -81,10 +96,12 @@ android {
         create("workspace") {
             initWith(getByName("debug"))
             applicationIdSuffix = ".test"
-            versionNameSuffix = "-test"
+            versionNameSuffix = "-mp.$mpVersionCode"
+            signingConfig = if (mpKeystorePath.isNullOrBlank()) signingConfigs.getByName("debug") else signingConfigs.getByName("mpRelease")
             resValue("string", "app_name", "MP工作台")
             buildConfigField("String", "UPDATE_RELEASE_REPOSITORY", "\"$mpReleaseRepository\"")
             buildConfigField("String", "UPDATE_RELEASE_API", "\"$mpReleaseApi\"")
+            buildConfigField("String", "UPDATE_RELEASE_TAG_PREFIX", "\"mp-v\"")
         }
     }
 
@@ -92,6 +109,12 @@ android {
         compose = true
         aidl = true
         buildConfig = true
+    }
+}
+
+androidComponents {
+    onVariants(selector().withBuildType("workspace")) { variant ->
+        variant.outputs.forEach { it.versionCode.set(mpVersionCode) }
     }
 }
 

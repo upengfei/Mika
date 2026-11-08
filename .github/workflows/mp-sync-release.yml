@@ -1,0 +1,97 @@
+name: MP workspace upstream sync and release
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mp-workspace-release
+  cancel-in-progress: false
+
+jobs:
+  sync-test-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mp-workspace
+          fetch-depth: 0
+      - name: Merge Mika upstream
+        id: sync
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/wangzan101/Mika.git
+          git fetch upstream main
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]; then
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          else
+            git merge --no-edit upstream/main
+          fi
+          code=$(cat mp-version-code.txt)
+          next=$((code + 1))
+          printf '%s\n' "$next" > mp-version-code.txt
+          git add mp-version-code.txt
+          git commit -m "ci: advance MP workspace version to $next"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "version_code=$next" >> "$GITHUB_OUTPUT"
+      - name: Set up Java
+        if: steps.sync.outputs.changed == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Set up Android SDK
+        if: steps.sync.outputs.changed == 'true'
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-36 build-tools;35.0.0"
+      - name: Run unit tests
+        if: steps.sync.outputs.changed == 'true'
+        run: ./gradlew --no-daemon :core:test :app:testDebugUnitTest
+      - name: Restore MP signing key
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          MP_SIGNING_KEYSTORE_BASE64: ${{ secrets.MP_SIGNING_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$MP_SIGNING_KEYSTORE_BASE64" || { echo "Missing MP_SIGNING_KEYSTORE_BASE64 secret"; exit 1; }
+          printf '%s' "$MP_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/mp-signing.jks"
+          echo "MP_SIGNING_KEYSTORE_FILE=$RUNNER_TEMP/mp-signing.jks" >> "$GITHUB_ENV"
+      - name: Build APK with MP signing key
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          MP_SIGNING_STORE_PASSWORD: ${{ secrets.MP_SIGNING_STORE_PASSWORD }}
+          MP_SIGNING_KEY_ALIAS: ${{ secrets.MP_SIGNING_KEY_ALIAS }}
+          MP_SIGNING_KEY_PASSWORD: ${{ secrets.MP_SIGNING_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon :app:assembleWorkspace -PmpReleaseRepository=https://github.com/upengfei/Mika -PmpVersionCode=${{ steps.sync.outputs.version_code }}
+      - name: Emulator startup smoke test
+        if: steps.sync.outputs.changed == 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          script: |
+            adb install app/build/outputs/apk/workspace/app-workspace.apk
+            adb shell am start -n com.wangzan101.mika.test/com.wangzan101.mika.ui.MainActivity
+            sleep 10
+            adb shell pidof com.wangzan101.mika.test
+      - name: Publish MP workspace release
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          base_version=$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n 1)
+          mp_version="${base_version}-mp.${{ steps.sync.outputs.version_code }}"
+          tag="mp-v$mp_version"
+          git push origin HEAD:mp-workspace
+          gh release create "$tag" app/build/outputs/apk/workspace/app-workspace.apk \
+            --repo upengfei/Mika --title "MP工作台 $mp_version" \
+            --notes "Built from Mika upstream and verified by unit tests and Android emulator startup smoke test."

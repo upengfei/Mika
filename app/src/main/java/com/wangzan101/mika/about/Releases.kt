@@ -61,6 +61,22 @@ object Releases {
         )
     }
 
+    /** Select the newest matching release from GitHub's releases list endpoint. */
+    fun fromGitHubList(text: String, tagPrefix: String, deviceAbis: List<String> = emptyList()): ReleaseInfo? {
+        val release = json.parseToJsonElement(text).jsonArray.firstOrNull { item ->
+            val tag = runCatching { item.jsonObject.str("tag_name") }.getOrNull()
+            tag?.startsWith(tagPrefix) == true && item.jsonObject["draft"]?.toString() != "true"
+        } ?: return null
+        val source = release.jsonObject
+        val tag = source.str("tag_name") ?: return null
+        val normalized = buildJsonObject {
+            source.forEach { (key, value) ->
+                put(key, if (key == "tag_name") JsonPrimitive(tag.removePrefix(tagPrefix)) else value)
+            }
+        }
+        return fromGitHub(normalized.toString(), deviceAbis)
+    }
+
     /**
      * 本机支持某个架构、发布里又有这个架构的专用包时取专用包(更小);否则取全架构包。
      * 只有别的架构的专用包时不取(装不上),这时打开发布页。
