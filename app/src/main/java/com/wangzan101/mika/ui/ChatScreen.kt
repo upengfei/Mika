@@ -347,7 +347,7 @@ fun ChatScreen(
                     )
                 },
             ) {
-                if (ui.exchanges.isEmpty() && ui.blocked == null) {
+                if (shouldShowChatEmptyState(ui.exchanges.isEmpty(), ui.blocked != null, input)) {
                     item("empty") {
                         EmptyState(ui.conversationId) { example ->
                             if (input.isEmpty()) vm.input(example) else pendingExample = example
