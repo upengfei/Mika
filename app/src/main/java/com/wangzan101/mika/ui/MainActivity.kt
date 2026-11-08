@@ -446,6 +446,7 @@ private fun MikaRoot(
                     reduceMotion = MikaTheme.reduceMotion,
                     onOpenDrawer = openDrawer,
                     openSettings = { nav.push(Route.Settings) },
+                    openTestWorkspace = { nav.push(Route.TestWorkspace) },
                     openRun = { runId = it; nav.push(Route.Run) },
                     phoneSetupNeeded = phoneSetupNeeded && status.builtinShell != BuiltinShellStatus.Running,
                     openPhoneSetup = { onFix(Fix.OpenPhoneSetup) },

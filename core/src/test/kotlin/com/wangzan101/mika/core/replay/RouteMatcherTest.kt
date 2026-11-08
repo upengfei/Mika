@@ -50,6 +50,26 @@ class RouteMatcherTest {
         assertEquals(1, model.requests.size)
     }
 
+    @Test fun pinnedTestRouteMatchesLocallyWithoutCallingTheModel() = runTest {
+        val previousGoal = "Open checkout\nTest case id: checkout\nTest case version: 1\nTest execution id: 11111111-1111-1111-1111-111111111111"
+        val currentGoal = "Open checkout\nTest case id: checkout\nTest case version: 1\nTest execution id: 22222222-2222-2222-2222-222222222222\nTest route id: pinned"
+        val route = memo.copy(id = "pinned", template = previousGoal, slots = 0)
+        val model = FakeModel()
+
+        val choice = RouteMatcher(model, MemRoutes(route), null).choose(currentGoal)
+
+        assertEquals(route, choice?.route)
+        assertTrue(model.requests.isEmpty())
+    }
+
+    @Test fun pinnedTestRouteMismatchFallsBackWithoutModelRouteSelection() = runTest {
+        val route = memo.copy(id = "pinned", template = "Open checkout", slots = 0)
+        val model = FakeModel()
+
+        assertNull(RouteMatcher(model, MemRoutes(route), null).choose("Open settings\nTest route id: pinned"))
+        assertTrue(model.requests.isEmpty())
+    }
+
     @Test fun slotNotInGoalRejected() = runTest {
         val m = FakeModel(text("""{"route": 1, "slots": ["明天开会"]}"""))
         assertNull(RouteMatcher(m, MemRoutes(memo), null).choose(goal))

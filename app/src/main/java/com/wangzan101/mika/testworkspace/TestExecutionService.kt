@@ -35,6 +35,7 @@ class TestExecutionService private constructor(
     private val startTask: (goal: String, conversationId: String?) -> Unit,
     private val clock: () -> Long,
     private val scheduleTask: (id: String, conversationId: String, goal: String, atMs: Long, intervalMs: Long) -> Unit,
+    private val routeLookup: (caseId: String, version: Int) -> String? = { _, _ -> null },
 ) {
     constructor(startTask: (goal: String, conversationId: String?) -> Unit) : this(startTask, System::currentTimeMillis, { _, _, _, _, _ -> })
 
@@ -49,6 +50,7 @@ class TestExecutionService private constructor(
         scheduleTask = { id, conversationId, goal, atMs, intervalMs ->
             TriggerRuntime.schedule(context, TriggerDefinition(id, conversationId, goal, atMs, intervalMs))
         },
+        routeLookup = { caseId, version -> TestRouteBindingStore(File(context.filesDir, "test-route-bindings.json")).routeId(caseId, version) },
     )
 
     fun start(
@@ -61,7 +63,7 @@ class TestExecutionService private constructor(
         require(caseVersion > 0) { "caseVersion must be positive" }
         val executionId = UUID.randomUUID().toString()
         val startedAtMs = clock()
-        startTask(contract.toGoal(caseId, caseVersion, executionId), conversationId)
+        startTask(goal(contract, caseId, caseVersion, executionId, routeLookup(caseId, caseVersion)), conversationId)
         return TestExecutionReceipt(executionId, contract.id, caseVersion, startedAtMs)
     }
 
@@ -69,23 +71,25 @@ class TestExecutionService private constructor(
         TestTaskContracts.requireValid(contract)
         val intervalMs = requireNotNull(contract.schedule?.intervalMinutes) { "task has no schedule" }.toLong() * 60_000L
         val scheduleId = "test-${contract.id}"
-        scheduleTask(scheduleId, conversationId, contract.toGoal(contract.id, contract.schemaVersion, "schedule-$scheduleId"), firstAtMs, intervalMs)
+        scheduleTask(scheduleId, conversationId, goal(contract, contract.id, contract.schemaVersion, "schedule-$scheduleId", routeLookup(contract.id, contract.schemaVersion)), firstAtMs, intervalMs)
         return TestScheduleReceipt(scheduleId, firstAtMs, intervalMs)
     }
 
-    private fun TestTaskContract.toGoal(caseId: String, caseVersion: Int, executionId: String): String = buildString {
-        append(command)
-        if (steps.isNotEmpty()) {
+    fun goal(contract: TestTaskContract, caseId: String = contract.id, caseVersion: Int = contract.schemaVersion, executionId: String = UUID.randomUUID().toString(), routeId: String? = null): String = buildString {
+        append(contract.command)
+        if (contract.steps.isNotEmpty()) {
             append("\n\nRequired steps:\n")
-            steps.forEachIndexed { index, step -> append("${index + 1}. ${step.instruction}\n") }
+            contract.steps.forEachIndexed { index, step -> append("${index + 1}. ${step.instruction}\n") }
         }
-        append("\nTest task id: ").append(id)
+        append("\nTest task id: ").append(contract.id)
         append("\nTest case id: ").append(caseId)
         append("\nTest case version: ").append(caseVersion)
         append("\nTest execution id: ").append(executionId)
+        routeId?.let { append("\nTest route id: ").append(it) }
         append("\nAssertions to verify:\n")
-        assertions.forEach { append("- ${it.id}: ${it.description}\n") }
+        contract.assertions.forEach { append("- ${it.id}: ${it.description}\n") }
     }
+
 }
 
 data class TestScheduleReceipt(val scheduleId: String, val firstAtMs: Long, val intervalMs: Long)

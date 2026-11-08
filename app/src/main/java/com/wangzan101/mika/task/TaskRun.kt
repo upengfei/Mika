@@ -60,6 +60,10 @@ import com.wangzan101.mika.core.record.RunEvent
 import com.wangzan101.mika.core.replay.RouteMatcher
 import com.wangzan101.mika.core.replay.RouteRecorder
 import com.wangzan101.mika.replay.FileRouteStore
+import com.wangzan101.mika.core.automation.TestAssertionKind
+import com.wangzan101.mika.testworkspace.TestCaseRepository
+import com.wangzan101.mika.testworkspace.TestRunRepository
+import com.wangzan101.mika.testworkspace.TestRouteBindingStore
 import com.wangzan101.mika.core.agent.JudgedOutcome
 import com.wangzan101.mika.core.agent.LearnGate
 import com.wangzan101.mika.core.agent.OutcomeJudge
@@ -103,6 +107,10 @@ import com.wangzan101.mika.takeover.TakeoverPort
 import com.wangzan101.mika.takeover.stoppedAt
 import com.wangzan101.mika.vision.BitmapImageOps
 import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -1256,11 +1264,38 @@ class TaskRun(
     /** 办成的运行记成路线;记不成(不该记、写盘失败)不影响任务结局。 */
     private suspend fun saveRoute(goal: String, events: List<RunEvent>, tools: ToolIndex) = withContext(Dispatchers.IO) {
         runCatching {
-            val route = RouteRecorder.record(goal, events, System.currentTimeMillis(), tools) ?: return@runCatching
+            val routeableGoal = goal.replace(Regex("(?m)^Test route id: [A-Za-z0-9_-]+\\s*$"), "").trimEnd()
+            val route = RouteRecorder.record(routeableGoal, events, System.currentTimeMillis(), tools) ?: return@runCatching
             val versions = route.packages.mapNotNull { p ->
                 runCatching { service.packageManager.getPackageInfo(p, 0).versionName }.getOrNull()?.let { p to it }
             }.toMap()
-            routeStore.putReplacing(route.copy(appVersions = versions))
+            val saved = route.copy(appVersions = versions)
+            val identity = TestRunRepository(RunStore(service)).identity(goal) ?: run {
+                routeStore.putReplacing(saved)
+                return@runCatching
+            }
+            val repository = TestCaseRepository(File(service.filesDir, "test-case-repository"))
+            val revision = repository.case(identity.caseId)?.revisions?.firstOrNull { it.version == identity.caseVersion }
+                ?: run {
+                    routeStore.putReplacing(saved)
+                    return@runCatching
+                }
+            val hard = revision.contract.assertions.filter { it.required && it.kind == TestAssertionKind.HARD }
+            val verifiers = events.filterIsInstance<RunEvent.Verifier>().filter { it.verdict == "pass" }.mapNotNull { event ->
+                runCatching { Json.parseToJsonElement(event.detailJson).jsonObject["checks"]?.jsonArray.orEmpty() }.getOrNull()
+            }.flatten().mapNotNull { check ->
+                runCatching {
+                    val row = check.jsonObject
+                    row["criterion"]?.jsonPrimitive?.content to row["status"]?.jsonPrimitive?.content
+                }.getOrNull()
+            }
+            val eligible = hard.all { assertion -> verifiers.any { it.first == assertion.description && it.second == "met" } } &&
+                (revision.contract.targetApp.isNullOrBlank() || revision.contract.targetApp in saved.packages)
+            if (eligible) {
+                routeStore.put(saved)
+                TestRouteBindingStore(File(service.filesDir, "test-route-bindings.json"))
+                    .bind(identity.caseId, revision.version, saved.id)
+            }
         }.onFailure { Log.w(TAG, "route not saved", it) }
     }
 

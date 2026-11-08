@@ -16,6 +16,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
+import java.util.regex.Pattern
 
 /** 选中的路线和本次原话里的槽值(按 `{1}`、`{2}` 的顺序)。 */
 data class RouteChoice(val route: Route, val slots: List<String>)
@@ -38,6 +39,11 @@ class RouteMatcher(private val model: ChatModel, val store: RouteStore, private 
     }
 
     suspend fun choose(goal: String): RouteChoice? {
+        val pinnedId = TEST_ROUTE_ID.find(goal)?.groupValues?.get(1)
+        if (pinnedId != null) {
+            val pinned = store.all().firstOrNull { it.id == pinnedId && !it.disabled } ?: return null
+            return exactChoice(pinned, goal)
+        }
         val list = candidates(goal)
         if (list.isEmpty()) return null
         val text = list.withIndex().joinToString("\n", "用户原话:$goal\n\n做法模板:\n") { (i, r) -> "${i + 1}. ${r.template}" }
@@ -57,6 +63,7 @@ class RouteMatcher(private val model: ChatModel, val store: RouteStore, private 
         private val SLOT = Regex("\\{\\d+\\}")
         private val SLOT_N = Regex("\\{(\\d+)\\}")
         private val TEST_EXECUTION_ID = Regex("(?m)^Test execution id: [a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\\s*$", RegexOption.IGNORE_CASE)
+        private val TEST_ROUTE_ID = Regex("(?m)^Test route id: ([A-Za-z0-9_-]+)\\s*$")
 
         private fun normalizeTestExecutionId(task: String): String = TEST_EXECUTION_ID.replace(task, "").trimEnd()
 
@@ -86,6 +93,41 @@ class RouteMatcher(private val model: ChatModel, val store: RouteStore, private 
             var unknown = false
             val filled = SLOT_N.replace(route.template) { m -> slots.getOrNull(m.groupValues[1].toInt() - 1) ?: run { unknown = true; "" } }
             if (unknown || squash(normalizeTestExecutionId(filled)) != squash(normalizeTestExecutionId(goal))) return null
+            return RouteChoice(route, slots)
+        }
+
+        /** Explicit test-case binding: match the saved template locally and skip route-selection inference. */
+        internal fun exactChoice(route: Route, goal: String): RouteChoice? {
+            val routeFreeGoal = normalizeTestExecutionId(TEST_ROUTE_ID.replace(goal, "").trimEnd())
+            val routeTemplate = normalizeTestExecutionId(route.template)
+            val slotsInTemplate = SLOT_N.findAll(routeTemplate).toList()
+            val indexes = slotsInTemplate.map { it.groupValues[1].toIntOrNull() ?: return null }
+            if (indexes.any { it !in 1..route.slots } || indexes.toSet() != (1..route.slots).toSet()) return null
+            val regex = buildString {
+                append('^')
+                var cursor = 0
+                slotsInTemplate.forEach { slot ->
+                    append(Pattern.quote(routeTemplate.substring(cursor, slot.range.first)))
+                    append("(.+?)")
+                    cursor = slot.range.last + 1
+                }
+                append(Pattern.quote(routeTemplate.substring(cursor)))
+                append('$')
+            }.toRegex(RegexOption.DOT_MATCHES_ALL)
+            val match = regex.matchEntire(routeFreeGoal) ?: return null
+            val values = mutableMapOf<Int, String>()
+            slotsInTemplate.forEachIndexed { index, slot ->
+                val slotNumber = indexes[index]
+                val value = match.groupValues[index + 1]
+                if (value.isBlank() || values[slotNumber]?.let { it != value } == true) return null
+                values[slotNumber] = value
+            }
+            val slots = (1..route.slots).map { values[it] ?: return null }
+            var unknown = false
+            val filled = SLOT_N.replace(routeTemplate) { token ->
+                slots.getOrNull(token.groupValues[1].toIntOrNull()?.minus(1) ?: -1) ?: run { unknown = true; "" }
+            }
+            if (unknown || filled != routeFreeGoal) return null
             return RouteChoice(route, slots)
         }
 

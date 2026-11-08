@@ -48,6 +48,7 @@ import com.wangzan101.mika.ui.components.GroupCard
 import com.wangzan101.mika.ui.components.GroupLabel
 import com.wangzan101.mika.ui.components.ListRow
 import com.wangzan101.mika.ui.components.MikaButton
+import com.wangzan101.mika.ui.components.MikaSwitch
 import com.wangzan101.mika.ui.components.RowChevron
 import com.wangzan101.mika.ui.components.StateCard
 import com.wangzan101.mika.ui.components.SubPage
@@ -108,6 +109,7 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
     var pendingExport by remember { mutableStateOf("") }
     var pendingExportName by remember { mutableStateOf("") }
     var pendingReportFile by remember { mutableStateOf<File?>(null) }
+    var chatRecommendations by remember { mutableStateOf(TestWorkspacePreferences.chatRecommendations(context)) }
 
     fun refreshCases() {
         projects = repository.projects()
@@ -180,6 +182,19 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
                 ListRow(MikaIcons.Lines, stringResource(R.string.test_workspace_suite), onClick = { section = TestWorkspaceSection.Suites }) { RowChevron() }
                 ListRow(MikaIcons.Check, stringResource(R.string.test_workspace_cases), onClick = { section = TestWorkspaceSection.Cases }) { RowChevron() }
                 ListRow(MikaIcons.Clock, stringResource(R.string.test_workspace_history), onClick = { section = TestWorkspaceSection.History; runs = runRepository.testRuns() }) { RowChevron() }
+            }
+            GroupCard {
+                ListRow(
+                    null,
+                    stringResource(R.string.test_workspace_chat_recommendations),
+                    stringResource(R.string.test_workspace_chat_recommendations_subtitle),
+                    first = true,
+                ) {
+                    MikaSwitch(chatRecommendations, { enabled ->
+                        chatRecommendations = enabled
+                        TestWorkspacePreferences.setChatRecommendations(context, enabled)
+                    })
+                }
             }
         }
         TestWorkspaceSection.Projects -> {
@@ -603,6 +618,19 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
             confirmButton = { TextButton(onClick = { repository.deleteCase(id); pendingDelete = null; refreshCases() }) { Text(stringResource(R.string.test_workspace_delete)) } },
             dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text(stringResource(R.string.test_workspace_cancel)) } },
         )
+    }
+}
+
+object TestWorkspacePreferences {
+    private const val FILE = "test-workspace-preferences"
+    private const val CHAT_RECOMMENDATIONS = "chat-recommendations"
+
+    fun chatRecommendations(context: Context): Boolean = context.applicationContext
+        .getSharedPreferences(FILE, Context.MODE_PRIVATE).getBoolean(CHAT_RECOMMENDATIONS, true)
+
+    fun setChatRecommendations(context: Context, enabled: Boolean) {
+        context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()
+            .putBoolean(CHAT_RECOMMENDATIONS, enabled).apply()
     }
 }
 

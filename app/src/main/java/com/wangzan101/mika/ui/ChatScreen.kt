@@ -115,11 +115,19 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.wangzan101.mika.R
+import com.wangzan101.mika.BuildConfig
 import com.wangzan101.mika.cap.web.KeptPage
 import com.wangzan101.mika.chat.SharedFile
 import com.wangzan101.mika.confirm.ConfirmationCopy
 import com.wangzan101.mika.settings.Prerequisites
 import com.wangzan101.mika.takeover.Takeover
+import com.wangzan101.mika.testworkspace.CompletedRunTestCasePrompt
+import com.wangzan101.mika.testworkspace.ManagedTestCase
+import com.wangzan101.mika.testworkspace.TestCaseRepository
+import com.wangzan101.mika.testworkspace.TestCaseSuggestions
+import com.wangzan101.mika.testworkspace.TestExecutionService
+import com.wangzan101.mika.testworkspace.TestRunRepository
+import com.wangzan101.mika.testworkspace.TestRouteBindingStore
 import com.wangzan101.mika.task.SteerNote
 import com.wangzan101.mika.task.SteerState
 import com.wangzan101.mika.task.TaskService
@@ -151,8 +159,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.time.LocalTime
+import java.io.File
 
 /**
  * 对话页:顶栏(左边打开侧栏、中间对话标题和此刻在做什么、右边新对话),对话在顶栏和玻璃输入栏之间滚动。
@@ -177,6 +187,7 @@ fun ChatScreen(
     /** 按运行记录取依据的来处(「来源」胶囊和点开后的截图);读盘的活由调用方放到后台线程。 */
     loadSource: suspend (runId: String) -> EvidenceSource? = { null },
     openSource: (runId: String?, legacyText: String?) -> Unit = { _, _ -> },
+    openTestWorkspace: () -> Unit = {},
     /** 输入栏按住说话从这里开会话;null 时只能打字。 */
     voice: VoiceSource? = null,
     /** 「还不能语音输入」里的「去选」。 */
@@ -279,6 +290,31 @@ fun ChatScreen(
     val c = MikaTheme.colors
     val backdrop = rememberGlassBackdrop()
     val context = LocalContext.current
+    var recommendedTestCases by remember { mutableStateOf(emptyList<ManagedTestCase>()) }
+    val showTestRecommendations = BuildConfig.BUILD_TYPE == "workspace" && TestWorkspacePreferences.chatRecommendations(context)
+    LaunchedEffect(context, showTestRecommendations, input, ui.exchanges) {
+        if (!showTestRecommendations) {
+            recommendedTestCases = emptyList()
+        } else {
+            val result = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val cases = TestCaseRepository(File(context.filesDir, "test-case-repository")).search()
+                val runRepository = TestRunRepository(com.wangzan101.mika.record.RunStore(context))
+                val runs = runRepository.testRuns()
+                val successfulIds = runs.asSequence()
+                    .filter { it.endedAtMs != null && it.judged == "done" && it.verdict == "pass" }
+                    .sortedByDescending { it.startedAtMs }
+                    .mapNotNull { summary ->
+                        val identity = runRepository.identity(summary.goal) ?: return@mapNotNull null
+                        cases.firstOrNull { it.id == identity.caseId && it.currentVersion == identity.caseVersion }?.id
+                    }
+                    .distinct().toList()
+                val query = input.takeIf { it.isNotBlank() }
+                    ?: if (ui.exchanges.isEmpty()) "" else "\u0000"
+                TestCaseSuggestions.recommend(cases, query, successfulIds)
+            }
+            recommendedTestCases = result
+        }
+    }
     /** 长按了的那条消息;菜单开着(收起的动画放完才清掉)。 */
     var menu by remember { mutableStateOf<MessageTarget?>(null) }
     /** 选了「选择文字」的那条:它换回系统的长按选中;换对话时清掉。 */
@@ -373,6 +409,18 @@ fun ChatScreen(
             Modifier.align(Alignment.BottomCenter).behindMenu(menuOpen) { lift.value }.onSizeChanged { composerHeight = it.height },
             backdrop = backdrop,
             text = input,
+            testCaseSuggestions = if (showTestRecommendations) ({
+                TestCaseRecommendationTray(
+                    cases = recommendedTestCases,
+                    enabled = ui.composer == ComposerMode.Idle,
+                    onRun = { record ->
+                        val routeId = TestRouteBindingStore(File(context.filesDir, "test-route-bindings.json")).routeId(record.id, record.currentVersion)
+                        val goal = TestExecutionService(context).goal(record.current.contract, record.id, record.currentVersion, routeId = routeId)
+                        vm.send(goal, check)
+                    },
+                    onViewAll = openTestWorkspace,
+                )
+            }) else null,
             draftKey = ui.conversationId,
             onText = vm::input,
             mode = ui.composer,
@@ -501,6 +549,8 @@ fun ChatScreen(
             )
         }
     }
+
+    CompletedRunTestCasePrompt(vm)
 
     pendingExample?.let { example ->
         MikaDialog(
@@ -1201,6 +1251,39 @@ private fun openShared(context: Context, f: SharedFile) = FileViewer.open(contex
 
 // ---------- 输入栏 ----------
 
+@Composable
+private fun TestCaseRecommendationTray(
+    cases: List<ManagedTestCase>,
+    enabled: Boolean,
+    onRun: (ManagedTestCase) -> Unit,
+    onViewAll: () -> Unit,
+) {
+    if (cases.isEmpty()) {
+        TextButton(onClick = onViewAll, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)) {
+            Text(stringResource(R.string.test_case_view_all), style = MikaType.Caption)
+        }
+        return
+    }
+    Column(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, bottom = 6.dp)) {
+        cases.forEach { record ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f).padding(vertical = 3.dp)) {
+                    Text(record.current.contract.name, style = MikaType.Caption, color = MikaTheme.colors.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    record.current.contract.targetApp?.takeIf(String::isNotBlank)?.let {
+                        Text(it, style = MikaType.Caption, color = MikaTheme.colors.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                TextButton(enabled = enabled, onClick = { onRun(record) }) {
+                    Text(stringResource(R.string.test_case_quick_run))
+                }
+            }
+        }
+        TextButton(onClick = onViewAll, modifier = Modifier.align(Alignment.End)) {
+            Text(stringResource(R.string.test_case_view_all), style = MikaType.Caption)
+        }
+    }
+}
+
 /** 「＋」面板:关着、开着、正让给键盘(点了输入框:键盘升起来时面板跟着矮下去,键盘到位再关)。 */
 private enum class Panel { Closed, Open, Yielding }
 
@@ -1213,6 +1296,7 @@ private enum class Panel { Closed, Open, Yielding }
 internal fun Composer(
     modifier: Modifier,
     text: String,
+    testCaseSuggestions: (@Composable () -> Unit)? = null,
     onText: (String) -> Unit,
     mode: ComposerMode,
     hasHistory: Boolean,
@@ -1334,6 +1418,7 @@ internal fun Composer(
             .padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 6.dp),
     ) {
         Column(Modifier.fillMaxWidth()) {
+            testCaseSuggestions?.invoke()
             if (busy) FollowUpModeBar(followUpMode, onFollowUpMode, followUpStatus)
             FollowUpTray(queued, active = mode != ComposerMode.Idle, onEdit = onEditQueued, onCancel = onCancelQueued, onStartNow = onStartQueued)
             quote?.let { QuoteChip(it, onRemoveQuote, Modifier.padding(bottom = 6.dp)) }
