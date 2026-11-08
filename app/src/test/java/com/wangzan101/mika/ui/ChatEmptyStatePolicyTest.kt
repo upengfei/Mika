@@ -20,4 +20,11 @@ class ChatEmptyStatePolicyTest {
         assertFalse(shouldShowChatEmptyState(hasNoExchanges = true, hasBlockedState = true, input = ""))
         assertFalse(shouldShowChatEmptyState(hasNoExchanges = false, hasBlockedState = false, input = ""))
     }
+
+    @Test
+    fun emptyRecommendationTrayIsHiddenOnlyForBlankInput() {
+        assertFalse(shouldShowTestCaseRecommendationTray(candidateCount = 0, input = ""))
+        assertTrue(shouldShowTestCaseRecommendationTray(candidateCount = 0, input = "find checkout"))
+        assertTrue(shouldShowTestCaseRecommendationTray(candidateCount = 1, input = ""))
+    }
 }

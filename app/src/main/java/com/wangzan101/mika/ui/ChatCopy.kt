@@ -30,7 +30,7 @@ object ChatCopy {
         Example(ExampleKind.App, tr(R.string.chat_example_multi_step)),
         Example(ExampleKind.Device, tr(R.string.chat_example_alarms)),
         Example(ExampleKind.App, tr(R.string.chat_example_ai_apps)),
-    )
+    ).distinctBy { it.kind }.take(3)
 
     /** 对话页顶栏的标题:固定是 App 名;副标题说此刻在做什么。 */
     const val APP_TITLE = "Mika"

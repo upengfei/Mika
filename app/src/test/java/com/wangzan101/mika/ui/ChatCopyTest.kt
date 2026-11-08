@@ -15,9 +15,10 @@ import java.time.ZoneId
 class ChatCopyTest {
     @get:Rule val texts = ChineseTexts()
 
-    @Test fun sixDistinctNonBlankExamples() {
-        assertEquals(6, ChatCopy.examples.size)
-        assertEquals(6, ChatCopy.examples.map { it.text }.filter { it.isNotBlank() }.toSet().size)
+    @Test fun threeStarterExamplesHaveDifferentTypes() {
+        assertEquals(3, ChatCopy.examples.size)
+        assertEquals(3, ChatCopy.examples.map { it.kind }.toSet().size)
+        assertEquals(3, ChatCopy.examples.map { it.text }.filter { it.isNotBlank() }.toSet().size)
     }
 
     /** 分支标题:源标题后面加后缀,总长不超过 24 字;截的是源标题,后缀留着,emoji 不截半个。 */

@@ -409,7 +409,7 @@ fun ChatScreen(
             Modifier.align(Alignment.BottomCenter).behindMenu(menuOpen) { lift.value }.onSizeChanged { composerHeight = it.height },
             backdrop = backdrop,
             text = input,
-            testCaseSuggestions = if (showTestRecommendations) ({
+            testCaseSuggestions = if (showTestRecommendations && shouldShowTestCaseRecommendationTray(recommendedTestCases.size, input)) ({
                 TestCaseRecommendationTray(
                     cases = recommendedTestCases,
                     enabled = ui.composer == ComposerMode.Idle,
