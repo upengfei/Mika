@@ -59,6 +59,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
         with:
           cache-provider: basic
+      - name: Prepare Kotlin compiler dependency
+        if: steps.sync.outputs.changed == 'true'
+        run: python3 tools/ci/prepare-kotlin-compiler.py
       - name: Run unit tests
         if: steps.sync.outputs.changed == 'true'
         run: bash tools/ci/gradle-with-network-retry.sh :core:test :app:testDebugUnitTest
