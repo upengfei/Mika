@@ -25,6 +25,30 @@ import java.io.File
 
 /** Thin Android adapters keep test-specific learning and checks out of Mika's execution loop. */
 object TestReplayRuntime {
+    suspend fun fastPolicy(
+        context: Context, goal: String, tools: ToolDispatcher, sink: RunSink, model: ChatModel, vision: ChatModel?,
+    ): TestFastReplay {
+        val prepared = withContext(Dispatchers.IO) {
+            runCatching {
+                val identity = parseTestRunIdentity(goal) ?: return@runCatching null
+                val version = identity.caseVersion ?: return@runCatching null
+                val revision = TestCaseRepository(File(context.filesDir, "test-case-repository")).case(identity.caseId)
+                    ?.revisions?.firstOrNull { it.version == version } ?: return@runCatching null
+                val bound = TestRouteBindingStore(File(context.filesDir, "test-route-bindings.json")).routeId(identity.caseId, version)
+                    ?: return@runCatching null
+                val executionId = Regex("(?m)^Test execution id: ([A-Za-z0-9-]+)$").find(goal)?.groupValues?.get(1) ?: return@runCatching null
+                val expected = TestExecutionService { _, _ -> }.goal(revision.contract, identity.caseId, version, executionId, bound)
+                if (goal.trimEnd() != expected.trimEnd()) return@runCatching null
+                val route = FileRouteStore.shared(context).all().firstOrNull { it.id == bound && !it.disabled } ?: return@runCatching null
+                revision.contract to route
+            }.getOrNull()
+        }
+        return TestFastReplay(goal, prepared?.first, prepared?.second?.id, prepared?.second,
+            currentVersion = { pkg -> installedVersion(context, pkg) },
+            verify = { end -> verify(context, goal, end, tools, sink, model, vision) as TaskState.Succeeded },
+        )
+    }
+
     fun learning(context: Context, tools: ToolIndex = knownTools()): TestRouteLearning {
         val runs = RunStore(context)
         return TestRouteLearning(
@@ -32,7 +56,7 @@ object TestReplayRuntime {
             bindings = TestRouteBindingStore(File(context.filesDir, "test-route-bindings.json")),
             routes = FileRouteStore.shared(context),
             summary = runs::summary, events = runs::events, append = runs::append,
-            appVersion = { p -> runCatching { context.packageManager.getPackageInfo(p, 0).versionName }.getOrNull() },
+            appVersion = { p -> installedVersion(context, p) },
             tools = tools,
         )
     }
@@ -71,6 +95,12 @@ object TestReplayRuntime {
             end.copy(verified = false, reviewed = true, note = "断言核查不可用，结果待验证", unconfirmed = end.unconfirmed + "断言核查不可用")
         }
     }
+
+    private fun installedVersion(context: Context, pkg: String): String? = runCatching {
+        context.packageManager.getPackageInfo(pkg, 0).let { info ->
+            info.versionName?.takeIf { it.isNotBlank() }?.let { "$it#${info.longVersionCode}" }
+        }
+    }.getOrNull()
 
     private const val VERIFICATION_SCREENSHOT = 999999
 }

@@ -62,7 +62,7 @@ class RouteMatcher(private val model: ChatModel, val store: RouteStore, private 
         const val TIMEOUT_MS = 20_000L
         private val SLOT = Regex("\\{\\d+\\}")
         private val SLOT_N = Regex("\\{(\\d+)\\}")
-        private val TEST_EXECUTION_ID = Regex("(?m)^Test execution id: [a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\\s*$", RegexOption.IGNORE_CASE)
+        private val TEST_EXECUTION_ID = Regex("(?m)^Test execution id: [A-Za-z0-9-]+\\s*$")
         private val TEST_ROUTE_ID = Regex("(?m)^Test route id: ([A-Za-z0-9_-]+)\\s*$")
 
         private fun normalizeTestExecutionId(task: String): String = TEST_EXECUTION_ID.replace(task, "").trimEnd()

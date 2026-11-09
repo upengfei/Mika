@@ -18,6 +18,35 @@ import org.junit.rules.TemporaryFolder
 class TestExecutionServiceTest {
     @get:Rule val tmp = TemporaryFolder()
 
+    @Test fun exportedReportRefreshesBackgroundUsageAfterInitialArchive() = kotlinx.coroutines.runBlocking {
+        val store = com.wangzan101.mika.record.RunStore(tmp.root.resolve("files"), { null }, 30, { 1_760_000_000_000L }, { it })
+        val handle = store.open("检查页面\nTest case id: check\nTest case version: 1")
+        handle.event(com.wangzan101.mika.core.record.RunEvent.TaskStarted(1, "检查页面", "model"))
+        MpRunCosts.measure("execution", write = { handle.event(it) }) { }
+        handle.event(com.wangzan101.mika.core.record.RunEvent.TaskEnded(2, "succeeded", "已完成"))
+        handle.close()
+        val repository = TestRunRepository(store, tmp.root.resolve("archive"))
+        repository.archive(handle.runId)
+        MpRunCosts.measure("learning", write = { store.append(handle.runId, it) }) {
+            kotlinx.coroutines.currentCoroutineContext()[com.wangzan101.mika.core.usage.RunUsageTally]!!.add(com.wangzan101.mika.core.model.Usage(123, 45, 10), 1)
+        }
+        val html = repository.exportHtml(handle.runId, tmp.root.resolve("report.html")).readText()
+        assertTrue(html.contains("后台学习："))
+        assertTrue(html.contains("123/45/10"))
+        val zip = repository.exportZip(handle.runId, tmp.root.resolve("report.zip"))
+        val entries = mutableMapOf<String, String>()
+        java.util.zip.ZipInputStream(zip.inputStream()).use { z ->
+            while (true) {
+                val entry = z.nextEntry ?: break
+                entries[entry.name] = z.readBytes().toString(Charsets.UTF_8)
+            }
+        }
+        val events = entries.getValue("events.jsonl").lines().filter { it.isNotBlank() }.map { com.wangzan101.mika.core.record.RunEvent.decode(it) }
+        assertEquals(123L, MpRunCosts.rows(events).first { it.phase == "learning" }.inputTokens)
+        assertTrue(entries.getValue("report.html").contains("123/45/10"))
+        assertFalse(TestExportRedactor.text("{\"inputTokens\":123,\"apiToken\":123}").contains("\"apiToken\":123"))
+    }
+
     @Test fun startsTaskServiceWithContractCommandAndSteps() {
         var receivedGoal = ""
         var receivedConversation: String? = null

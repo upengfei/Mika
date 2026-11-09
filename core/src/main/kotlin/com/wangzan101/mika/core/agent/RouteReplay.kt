@@ -38,11 +38,15 @@ internal class RouteReplay(
     private val show: (TaskState.Running) -> Unit,
     private val emit: (RunEvent) -> Unit,
     private val clock: () -> Long,
+    private val extensions: RunExtensions = RunExtensions.None,
 ) {
     /** 本次任务回放过的路线与结果。 */
     private var replayed: Pair<Route, ReplayOutcome>? = null
 
-    fun reset() { replayed = null }
+    var completion: TaskState.Succeeded? = null
+        private set
+
+    fun reset() { replayed = null; completion = null }
 
     /** 交还时读屏用最近操作的那块屏的读元素工具(回放的路线落在哪块屏就读哪块)。 */
     private val dumpTool: String get() = tools.index.nameOf(Verb.ListElements, tools.surface)!!
@@ -50,7 +54,10 @@ internal class RouteReplay(
     /**
      * 找路线并回放;回放过就把经过(做了哪几步、在哪对不上)和一份当前全量读屏交给模型,返回读屏里的前台 App。
      */
-    suspend fun run(task: String, history: MutableList<Message>, executor: ActionExecutor, ctx: ContextBuilder, track: StepTrack): Place? {
+    suspend fun run(
+        task: String, history: MutableList<Message>, executor: ActionExecutor, ctx: ContextBuilder, track: StepTrack,
+        canComplete: () -> Boolean = { true }, acceptCompletion: () -> Boolean = { true },
+    ): Place? {
         val choice = try {
             withContext(Dispatchers.IO) { routes.choose(task) }
         } catch (e: CancellationException) {
@@ -58,6 +65,10 @@ internal class RouteReplay(
         } catch (e: Exception) {
             null
         } ?: return null
+        if (!extensions.allowReplay(task, choice.route)) {
+            emit(RunEvent.State(clock(), "mp_replay_revalidate", "目标 App 版本变化或信息不完整，改由 Mika 执行核查"))
+            return null
+        }
         val total = choice.route.steps.size
         var running = TaskState.Running(0, REPLAY_NOTE, progress = RunProgress.Replay(1, total))
         show(running)
@@ -86,6 +97,12 @@ internal class RouteReplay(
                 }
                 else -> r.copy(lastUsedMs = clock())
             }
+        }
+        if (out is ReplayOutcome.Completed && canComplete()) {
+            completion = extensions.completeReplay(task, choice.route)
+            // Acceptance closes the inbox atomically. A steer racing verification must receive the full handback below.
+            if (completion != null && acceptCompletion()) return null
+            completion = null
         }
         val steps = choice.route.steps
         val doneLines = steps.take(out.done).mapIndexed { i, st -> "${i + 1}. ${Replayer.describe(st, choice.slots)}" }.joinToString("\n")

@@ -6,6 +6,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.longOrNull
 
 /** Removes credential fields and known credential values from text leaving the device. */
 internal object TestExportRedactor {
@@ -34,7 +35,9 @@ internal object TestExportRedactor {
 
     private fun sanitize(value: JsonElement): JsonElement = when (value) {
         is JsonObject -> JsonObject(value.mapValues { (key, element) ->
-            if (credentialName.containsMatchIn(key)) JsonPrimitive("***") else sanitize(element)
+            val usageCounter = key in setOf("inputTokens", "outputTokens", "cachedTokens") &&
+                element is JsonPrimitive && !element.isString && element.longOrNull?.let { it >= 0 } == true
+            if (credentialName.containsMatchIn(key) && !usageCounter) JsonPrimitive("***") else sanitize(element)
         })
         is JsonArray -> JsonArray(value.map(::sanitize))
         is JsonPrimitive -> if (value.isString) {

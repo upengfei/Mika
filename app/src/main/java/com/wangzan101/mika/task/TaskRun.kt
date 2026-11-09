@@ -59,6 +59,11 @@ import com.wangzan101.mika.core.model.ModelRole
 import com.wangzan101.mika.core.record.RunEvent
 import com.wangzan101.mika.core.replay.RouteMatcher
 import com.wangzan101.mika.replay.FileRouteStore
+import com.wangzan101.mika.testworkspace.TestFastReplay
+import com.wangzan101.mika.testworkspace.MpRunCosts
+import com.wangzan101.mika.testworkspace.MpSkillLearning
+import com.wangzan101.mika.core.agent.RunExtensions
+import com.wangzan101.mika.core.skills.SkillLearningPolicy
 import com.wangzan101.mika.testworkspace.TestReplayRuntime
 import com.wangzan101.mika.testworkspace.parseTestRunIdentity
 import com.wangzan101.mika.core.agent.JudgedOutcome
@@ -498,7 +503,10 @@ class TaskRun(
         return RetestHint.apply(end, ProviderStore.get(service).untestedMainProvider()) { tr(R.string.fail_model_untested, it) }
     }
 
+    private var fastReplay: TestFastReplay? = null
+
     suspend fun execute(priorTurns: List<Turn>): TaskState {
+        fastReplay = null
         // 手机一侧(内置助手、无障碍、虚拟屏)第一次 launch_app 时才接上:只用网页、沙箱的任务不需要它们
         var connection: com.wangzan101.mika.cap.phone.shell.ShellBinding? = null
         phone = null
@@ -855,6 +863,8 @@ class TaskRun(
                 root = phoneServices.shellManager.root.takeIf { !conditionCheck && it.commandsAllowed() }
                     ?.let { r -> RootCommands(RootShell::su, r::commandsAllowed) { a -> if (a == null) r.suGone() else r.commandsDenied(a) } })
             dispatcher = tools
+            val optimization = if (BuildConfig.BUILD_TYPE == "workspace") TestReplayRuntime.fastPolicy(service, goal, tools, sink, model, vision)
+                .also { fastReplay = it } else RunExtensions.None
             val agent = AgentLoop(
                 model, tools,
                 SystemPrompt.identity(),
@@ -890,6 +900,7 @@ class TaskRun(
                 // 选路线是辅助判断:用轻量模型,没配用主模型
                 routes = if (speed.replay) RouteMatcher(light ?: model, routeStore, knowledge) else null,
                 skills = catalog,
+                extensions = optimization,
                 memory = memory,
                 interaction = service.interaction(conversationId, channelPeer),
                 profileSnapshot = profileSnapshot,
@@ -999,10 +1010,14 @@ class TaskRun(
                     service.refreshNotifications(this@TaskRun)
                 }
             }
-            val end = withContext(tally) {
+            suspend fun executeAndVerify(): TaskState {
                 val executed = agent.run(runSpec, inbox)
-                TestReplayRuntime.verify(service, goal, executed, tools, sink, model, vision)
+                if (fastReplay?.accepted === executed) return executed
+                return TestReplayRuntime.verify(service, goal, executed, tools, sink, model, vision)
             }
+            val end = if (BuildConfig.BUILD_TYPE == "workspace") MpRunCosts.measure("execution", tally, write = { sink.event(it) }) {
+                executeAndVerify()
+            } else withContext(tally) { executeAndVerify() }
             resultReadyAtMs = SystemClock.elapsedRealtime()
             return end.also { usedGroups = agent.usedGroups.toList() }.let(::withRetestHint)
         } finally {
@@ -1208,10 +1223,14 @@ class TaskRun(
      * 记进运行记录和这一轮对话;只有办成的([LearnGate])才记路线、给回放的路线记成功。
      * 放弃、失败、取消的不判(结局已经清楚),返回 null;判不成是 [RunOutcome.Unknown]。
      */
-    suspend fun settleOutcome(end: TaskState, conversations: ConversationStore): JudgedOutcome? {
+    suspend fun settleOutcome(end: TaskState, conversations: ConversationStore): JudgedOutcome? = measuredAfter("outcome") {
+        settleOutcomeBody(end, conversations)
+    }
+
+    private suspend fun settleOutcomeBody(end: TaskState, conversations: ConversationStore): JudgedOutcome? {
         val k = kit ?: return null
         if (end !is TaskState.Succeeded) return null
-        val judged = if (BuildConfig.BUILD_TYPE == "workspace" && parseTestRunIdentity(goal) != null && end.doubtful) {
+        val judged = fastReplay?.localOutcome(end) ?: if (BuildConfig.BUILD_TYPE == "workspace" && parseTestRunIdentity(goal) != null && end.doubtful) {
             JudgedOutcome(RunOutcome.Partial, end.note ?: "测试断言未通过或证据不足")
         } else OutcomeJudge(k.light ?: k.model, k.model).judge(k.agent.taskText ?: goal, end.answer, k.priorTurns)
         val runId = _runId.value
@@ -1233,7 +1252,11 @@ class TaskRun(
      * 结果通知发出之后调用:记下用到的个人技能的结果、提取记忆、起草技能,提示挂到这一轮的结果卡片上并存进对话。
      * 在进程级的作用域里跑,服务退出也不中断。
      */
-    suspend fun learnAfter(end: TaskState, outcome: RunOutcome?, conversations: ConversationStore) {
+    suspend fun learnAfter(end: TaskState, outcome: RunOutcome?, conversations: ConversationStore) = measuredAfter("learning") {
+        learnAfterBody(end, outcome, conversations)
+    }
+
+    private suspend fun learnAfterBody(end: TaskState, outcome: RunOutcome?, conversations: ConversationStore) {
         val k = kit ?: return
         val runId = _runId.value
         val learning = RunLearning(
@@ -1244,6 +1267,7 @@ class TaskRun(
             appDrafts = memoryRuntime.appKnowledge(),
             ids = { UUID.randomUUID().toString() },
             autoApprove = env.evalHooks.autoApproveSkillDrafts,
+            skillPolicy = if (BuildConfig.BUILD_TYPE == "workspace") MpSkillLearning else SkillLearningPolicy.Default,
             yieldToForeground = { while (service.hasActiveRuns()) delay(500) },
         )
         val notes = learning.learn(RunAftermath(
@@ -1261,6 +1285,20 @@ class TaskRun(
                 conversations.updateTurn(conversationId, runId) { it.copy(memoryNotes = notes.memoryNotes, usedMemory = notes.usedMemory, skillNotes = notes.skillNotes) }
             }.onFailure { Log.w(TAG, "could not save memory notes", it) }
         }
+    }
+
+    private suspend fun <T> measuredAfter(phase: String, block: suspend () -> T): T {
+        if (BuildConfig.BUILD_TYPE != "workspace") return block()
+        return MpRunCosts.measure(phase, write = { event ->
+            withContext(Dispatchers.IO) {
+                _runId.value?.let { id -> kit?.runStore?.let { store ->
+                    store.append(id, event)
+                    if (event is RunEvent.State && event.name == MpRunCosts.EVENT && parseTestRunIdentity(goal) != null) {
+                        store.copyTo(id, java.io.File(service.filesDir, "test-reports/$id"))
+                    }
+                } }
+            }
+        }, block = block)
     }
 
     /** 办成的运行记成路线;记不成(不该记、写盘失败)不影响任务结局。 */

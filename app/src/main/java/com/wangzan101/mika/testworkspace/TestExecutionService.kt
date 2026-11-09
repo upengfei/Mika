@@ -133,7 +133,7 @@ class TestRunRepository(private val store: RunStore, private val archiveRoot: Fi
     }
 
     fun exportHtml(runId: String, destination: File): File {
-        val directory = archiveDirectory(runId)
+        val directory = refreshArchive(runId)
         val html = File(directory, "report.html")
         if (!html.isFile) {
             val summary = readSummary(directory) ?: throw FileNotFoundException("Archived report is unavailable")
@@ -145,7 +145,7 @@ class TestRunRepository(private val store: RunStore, private val archiveRoot: Fi
     }
 
     fun exportZip(runId: String, destination: File): File {
-        val directory = archiveDirectory(runId)
+        val directory = refreshArchive(runId)
         if (!File(directory, "report.html").isFile) archive(runId)
         destination.parentFile?.mkdirs()
         ZipOutputStream(FileOutputStream(destination)).use { zip ->
@@ -162,7 +162,7 @@ class TestRunRepository(private val store: RunStore, private val archiveRoot: Fi
 
     /** A compact paginated PDF that keeps failed actions and their available screenshots in the document. */
     fun exportPdf(runId: String, destination: File): File {
-        val directory = archiveDirectory(runId)
+        val directory = refreshArchive(runId)
         val summary = readSummary(directory) ?: throw FileNotFoundException("Archived report is unavailable")
         val timeline = readEvents(directory)
         destination.parentFile?.mkdirs()
@@ -213,6 +213,8 @@ class TestRunRepository(private val store: RunStore, private val archiveRoot: Fi
             line("Result: ${testRunResult(summary)} · Model: ${summary.model} · Steps: ${summary.steps}")
             line("Command: ${summary.goal}")
             line("Assertions: ${summary.criteria.joinToString("; ")}")
+            line("执行与后台成本", heading)
+            MpRunCosts.report(timeline).forEach { line(it) }
             timeline.forEach { event ->
                 when (event) {
                     is RunEvent.Activity -> {
@@ -245,6 +247,15 @@ class TestRunRepository(private val store: RunStore, private val archiveRoot: Fi
         return destination
     }
 
+    private fun refreshArchive(runId: String): File {
+        // Outcome/learning events arrive after the task result. Refresh exports while the live run exists.
+        if (store.summary(runId) != null) return archive(runId)
+        val directory = archiveDirectory(runId)
+        val summary = readSummary(directory) ?: throw FileNotFoundException("Archived report is unavailable")
+        File(directory, "report.html").writeText(renderHtml(summary, readEvents(directory), directory))
+        return directory
+    }
+
     private fun archiveDirectory(runId: String): File {
         require(Regex("\\d{8}-\\d{6}-[a-z0-9]{6}").matches(runId)) { "invalid run id" }
         return File(requireNotNull(archiveRoot) { "report archive directory is not configured" }, runId)
@@ -268,6 +279,7 @@ class TestRunRepository(private val store: RunStore, private val archiveRoot: Fi
                 is RunEvent.TaskEnded -> "${event.outcome}: ${event.answerOrReason.orEmpty()}"
                 is RunEvent.Criteria -> "Assertions: ${event.criteria.joinToString("; ")}"
                 is RunEvent.Verifier -> "断言核查：${event.verdict} · ${event.detailJson}"
+                is RunEvent.State -> "${event.name} · ${event.detail}"
                 else -> event::class.simpleName.orEmpty()
             }
             val failure = event is RunEvent.Activity && event.failed || event is RunEvent.ToolResult && event.changed == false ||
@@ -289,10 +301,11 @@ class TestRunRepository(private val store: RunStore, private val archiveRoot: Fi
             "<tr class=\"${if (failure) "failure" else ""}\"><td>${event.atMs}</td><td>${event::class.simpleName.orEmpty()}</td><td>${TestExportRedactor.text(detail).html()}</td><td>$evidence</td></tr>"
         }
         val verdict = testRunResult(summary)
-        return """<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Test run ${summary.id}</title>
+        return """<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Test run ${summary.id}</title>
 <style>body{font:14px system-ui,sans-serif;margin:24px;color:#202124}table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:8px;border-bottom:1px solid #ddd;vertical-align:top}.failure{background:#fff0ee}img{max-width:480px}</style>
 <h1>Test run ${summary.id.html()}</h1><p>Result: ${TestExportRedactor.text(verdict).html()} · Model: ${TestExportRedactor.text(summary.model).html()} · Steps: ${summary.steps}</p>
 <h2>Command</h2><pre>${TestExportRedactor.text(summary.goal).html()}</pre><h2>Assertions</h2><ul>${summary.criteria.joinToString("") { "<li>${TestExportRedactor.text(it).html()}</li>" }}</ul>
+<h2>执行与后台成本</h2><ul>${MpRunCosts.report(events).joinToString("") { "<li>${it.html()}</li>" }}</ul>
 <h2>Timeline</h2><table><thead><tr><th>Time</th><th>Event</th><th>Details</th><th>Evidence</th></tr></thead><tbody>$rows</tbody></table></html>"""
     }
 
@@ -321,6 +334,6 @@ internal fun parseTestRunIdentity(goal: String): TestRunIdentity? {
     return TestRunIdentity(
         caseId = caseId,
         caseVersion = Regex("Test case version: (\\d+)").find(goal)?.groupValues?.get(1)?.toIntOrNull(),
-        executionId = Regex("Test execution id: ([a-f0-9-]+)").find(goal)?.groupValues?.get(1),
+        executionId = Regex("(?m)^Test execution id: ([A-Za-z0-9-]+)$").find(goal)?.groupValues?.get(1),
     )
 }

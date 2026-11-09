@@ -62,6 +62,16 @@ class RouteMatcherTest {
         assertTrue(model.requests.isEmpty())
     }
 
+    @Test fun scheduledExecutionUsesTheSamePinnedCaseVersionWithoutInference() = runTest {
+        val previous = "打开商品\nTest case id: checkout\nTest case version: 2\nTest execution id: 11111111-1111-1111-1111-111111111111"
+        val current = "打开商品\nTest case id: checkout\nTest case version: 2\nTest execution id: schedule-test-checkout\nTest route id: pinned"
+        val route = memo.copy(id = "pinned", template = previous, slots = 0)
+        val model = FakeModel()
+        assertEquals(route, RouteMatcher(model, MemRoutes(route), null).choose(current)?.route)
+        assertTrue(model.requests.isEmpty())
+        assertNull(RouteMatcher(model, MemRoutes(route), null).choose(current.replace("version: 2", "version: 3")))
+    }
+
     @Test fun pinnedTestRouteMismatchFallsBackWithoutModelRouteSelection() = runTest {
         val route = memo.copy(id = "pinned", template = "Open checkout", slots = 0)
         val model = FakeModel()

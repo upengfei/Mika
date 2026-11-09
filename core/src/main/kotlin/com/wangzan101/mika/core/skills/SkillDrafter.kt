@@ -43,7 +43,7 @@ object Eligibility {
     const val MIN_ACTIONS = 5
 
     /** null = 可以起草;否则是不起草的原因。[done]:这次运行算办成了([com.wangzan101.mika.core.agent.LearnGate])。 */
-    fun check(events: List<RunEvent>, followedPersonalSkill: String?, tools: ToolIndex, done: Boolean): String? {
+    fun check(events: List<RunEvent>, followedPersonalSkill: String?, tools: ToolIndex, done: Boolean, minimumActions: Int = MIN_ACTIONS): String? {
         val ended = events.filterIsInstance<RunEvent.TaskEnded>().lastOrNull()
         return when {
             ended?.outcome != "succeeded" -> "not_succeeded"
@@ -51,7 +51,7 @@ object Eligibility {
             // 这次用户已经让 Mika 照他的意思写下了技能,不再另起一份草稿
             events.any { it is RunEvent.ToolResult && tools.verb(it.tool) == Verb.SkillSave && it.resultJson.contains("\"ok\":true") } -> "skill_saved"
             // 出错的动作不算步数(结果可能被截短,按原文判)
-            events.count { it is RunEvent.ToolResult && tools.verb(it.tool) in ACTION_VERBS && !it.resultJson.contains("\"ok\":false") } < MIN_ACTIONS -> "too_few_actions"
+            events.count { it is RunEvent.ToolResult && tools.verb(it.tool) in ACTION_VERBS && !it.resultJson.contains("\"ok\":false") } < minimumActions.coerceAtLeast(1) -> "too_few_actions"
             else -> interrupted(events) ?: "followed_personal_skill".takeIf { followedPersonalSkill != null }
         }
     }

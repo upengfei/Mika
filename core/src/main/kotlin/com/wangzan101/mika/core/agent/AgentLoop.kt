@@ -168,6 +168,7 @@ class AgentLoop(
     /** 同一网站、App 里连着做对外动作(发送、提交)时两次之间的间隔;默认不等。 */
     private val outwardPacing: OutwardPacing = OutwardPacing.Off,
     private val trace: RunTrace? = null,
+    private val extensions: RunExtensions = RunExtensions.None,
 ) {
     init {
         require(maxSteps > 0) { "maxSteps must be positive" }
@@ -215,7 +216,7 @@ class AgentLoop(
     private val utterances get() = tools.utterances
 
     private val user = UserExchange(tools, confirmations, confirmTimeoutMs, inputTimeoutMs, { utterances }, { _state.value = it }, ::emit, ::now)
-    private val replay = routes?.let { RouteReplay(it, tools, ::awaitGate, { r -> gateState = r; _state.value = r }, ::emit, clock) }
+    private val replay = routes?.let { RouteReplay(it, tools, ::awaitGate, { r -> gateState = r; _state.value = r }, ::emit, clock, extensions) }
 
     @Volatile private var job: Job? = null
     /** 锁屏/被拿走关卡等完之后恢复的界面状态(当前这一步、批或回放)。 */
@@ -417,7 +418,7 @@ class AgentLoop(
         val installed = try { installedApps() } catch (e: CancellationException) { throw e } catch (e: Exception) { emptyList() }
         val labels = installed.toMap()
         val matched = knowledge?.matchTask(task, Int.MAX_VALUE, installed).orEmpty()
-        val index = if (skills != null && recommendSkills) GuideRecommender.index(skills, task) else null
+        val index = if (skills != null && recommendSkills) extensions.guideIndex(skills, task, installed) else null
         val start = ctx.start(
             task, priorTurns = context?.let { (it.parts.single() as Part.Text).text }?.let { prior ->
                 // 之前几轮读到的东西查得到时说一句(只在有记过运行的轮次、提供了 history_read 时)
@@ -479,10 +480,17 @@ class AgentLoop(
         // 第一次模型调用之前:有合适的路线就先照着做,不调模型;做完或对不上都交还模型
         // 路线只记、只放手机上的做法:点名用网页的任务不回放
         if (flags.replay && replay != null && !task.trimStart().startsWith(WEB_CHANNEL_PREFIX)) {
-            val reviewRoute = provenance.origin == RunOrigin.Ui && intentGate != null && routeMatcher?.candidates(task)?.isNotEmpty() == true
+            val reviewRoute = !extensions.directReplay(task) && provenance.origin == RunOrigin.Ui && intentGate != null && routeMatcher?.candidates(task)?.isNotEmpty() == true
             if (reviewRoute) intent = assessIntent()
             if (!reviewRoute || intent == IntentGate.Intent.Read || intent == IntentGate.Intent.Act) {
-                replay.run(task, history, executor, ctx, track)?.let { place = it; acted = true }
+                replay.run(task, history, executor, ctx, track,
+                    canComplete = { inbox?.hasSteers() != true },
+                    acceptCompletion = { inbox?.closeUnlessSteered() != false },
+                )?.let { place = it; acted = true }
+                replay.completion?.let { completed ->
+                    extensions.acceptedCompletion(completed)
+                    return completed
+                }
             }
         }
 

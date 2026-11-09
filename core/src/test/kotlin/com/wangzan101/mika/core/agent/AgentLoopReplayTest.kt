@@ -59,6 +59,98 @@ class AgentLoopReplayTest {
         }
     }
 
+    @Test fun explicitVerifiedReplayCanFinishWithoutAnyModelCall() = runBlocking {
+        val main = FakeModel()
+        val matcher = FakeModel()
+        val intent = FakeModel()
+        val sink = Events()
+        var accepted = false
+        val extensions = object : RunExtensions {
+            override suspend fun directReplay(task: String) = true
+            override suspend fun completeReplay(task: String, route: com.wangzan101.mika.core.replay.Route) = TaskState.Succeeded("核查通过")
+            override fun acceptedCompletion(end: TaskState.Succeeded) { accepted = true }
+        }
+        val agent = AgentLoop(main, toolDispatcher(Notes.screen()), "BASE", sink = sink,
+            flags = SpeedFlags(replay = true), intentJudge = intent, extensions = extensions,
+            routes = RouteMatcher(matcher, MemRoutes(Notes.route()), null))
+        val end = agent.run("$goal\nTest route id: r1")
+        assertEquals("核查通过", (end as TaskState.Succeeded).answer)
+        assertTrue(accepted)
+        assertTrue(main.requests.isEmpty() && matcher.requests.isEmpty() && intent.requests.isEmpty())
+        assertEquals(3, sink.all.filterIsInstance<RunEvent.Replay>().count { it.matched })
+        assertEquals("succeeded", sink.all.filterIsInstance<RunEvent.TaskEnded>().single().outcome)
+    }
+
+    @Test fun staleVersionGatePreventsEveryReplayWrite() = runBlocking {
+        val screen = Notes.screen()
+        val main = FakeModel(finish)
+        val sink = Events()
+        val extensions = object : RunExtensions {
+            override suspend fun allowReplay(task: String, route: com.wangzan101.mika.core.replay.Route) = false
+        }
+        AgentLoop(main, toolDispatcher(screen), "BASE", sink = sink, flags = SpeedFlags(replay = true), extensions = extensions,
+            routes = RouteMatcher(FakeModel(), MemRoutes(Notes.route()), null)).run("$goal\nTest route id: r1")
+        assertTrue(screen.typed.isEmpty())
+        assertTrue(sink.all.none { it is RunEvent.Replay })
+        assertEquals(1, main.requests.size)
+    }
+
+    @Test fun divergedRouteNeverInvokesFastCompletion() = runBlocking {
+        var attempts = 0
+        val screen = Notes.screen().apply { links.clear() }
+        val main = FakeModel(finish)
+        AgentLoop(main, toolDispatcher(screen), "BASE", flags = SpeedFlags(replay = true),
+            routes = RouteMatcher(FakeModel(), MemRoutes(Notes.route()), null),
+            extensions = object : RunExtensions {
+                override suspend fun completeReplay(task: String, route: com.wangzan101.mika.core.replay.Route): TaskState.Succeeded? { attempts++; return TaskState.Succeeded("wrong") }
+            }).run("$goal\nTest route id: r1")
+        assertEquals(0, attempts)
+        assertEquals(1, main.requests.size)
+    }
+
+    @Test fun steerArrivingDuringVerificationReturnsToModelInsteadOfAcceptingFastResult() = runBlocking {
+        val inbox = com.wangzan101.mika.core.run.RunInbox()
+        val main = FakeModel(finish)
+        var accepted = false
+        val extensions = object : RunExtensions {
+            override suspend fun completeReplay(task: String, route: com.wangzan101.mika.core.replay.Route): TaskState.Succeeded {
+                inbox.steer("s1", "请同时说明保存到了哪里")
+                return TaskState.Succeeded("不得静默收尾")
+            }
+            override fun acceptedCompletion(end: TaskState.Succeeded) { accepted = true }
+        }
+        val agent = AgentLoop(main, toolDispatcher(Notes.screen()), "BASE", flags = SpeedFlags(replay = true), extensions = extensions,
+            routes = RouteMatcher(FakeModel(), MemRoutes(Notes.route()), null))
+        val end = agent.run(com.wangzan101.mika.core.run.RunSpec(com.wangzan101.mika.core.run.RunId("test"), "$goal\nTest route id: r1", "chat"), inbox)
+        assertFalse(accepted)
+        assertEquals(1, main.requests.size)
+        assertTrue(main.requests.single().toString().contains("请同时说明保存到了哪里"))
+        assertTrue(main.requests.single().toString().contains("replay_handback"))
+        assertTrue(main.requests.single().toString().contains("All steps of the earlier way of doing this were run"))
+        assertFalse((end as TaskState.Succeeded).answer.contains("不得静默收尾"))
+    }
+
+    @Test fun completionRejectedAtAtomicAcceptanceStillHandsBackExecutedSteps() = runBlocking {
+        val tools = toolDispatcher(Notes.screen())
+        val sink = Events()
+        val executor = com.wangzan101.mika.core.action.ActionExecutor(tools,
+            com.wangzan101.mika.core.guard.OperationGuards(), null, gate = {},
+            recorder = com.wangzan101.mika.core.action.ActionRecorder(sink))
+        val replay = RouteReplay(RouteMatcher(FakeModel(), MemRoutes(Notes.route()), null), tools, {}, {}, sink::event, { 1L },
+            object : RunExtensions {
+                override suspend fun completeReplay(task: String, route: com.wangzan101.mika.core.replay.Route) = TaskState.Succeeded("核查通过")
+            })
+        val history = mutableListOf<Message>()
+        var acceptAttempts = 0
+        replay.run("$goal\nTest route id: r1", history, executor, ContextBuilder(), StepTrack(),
+            canComplete = { true }, acceptCompletion = { acceptAttempts++; false })
+        assertEquals(1, acceptAttempts)
+        assertEquals(null, replay.completion)
+        assertTrue(history.toString().contains("replay_handback"))
+        assertTrue(history.toString().contains("All steps of the earlier way of doing this were run"))
+        assertEquals(3, sink.all.filterIsInstance<RunEvent.Replay>().count { it.matched })
+    }
+
     @Test fun goalsThatNameTheWebAreNotReplayed() {
         val matcher = FakeModel(text(pick))
         val r = run(matcher = matcher, task = "用网页$goal")

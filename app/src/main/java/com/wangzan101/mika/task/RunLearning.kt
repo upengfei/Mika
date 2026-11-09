@@ -20,6 +20,7 @@ import com.wangzan101.mika.core.record.RunEvent
 import com.wangzan101.mika.core.observation.PlaceKind
 import com.wangzan101.mika.core.run.RunOrigin
 import com.wangzan101.mika.core.skills.DraftInput
+import com.wangzan101.mika.core.skills.ActionDigest
 import com.wangzan101.mika.core.skills.DraftResult
 import com.wangzan101.mika.core.skills.Eligibility
 import com.wangzan101.mika.core.skills.PersonalSkills
@@ -64,8 +65,8 @@ data class RunAftermath(
  * 办成按交出回答后判的结局([RunAftermath.outcome])算,不按「交出了回答」,也不要求跑过最终核查([LearnGate])。
  * 全在结果通知发出之后的后台协程里做([launchAfter]);哪一步出错都不影响任务结局。
  *
- * 不起草的情形另加一条:这次走的是回放的路线([RunEvent.Replay] 有对上的步)——路线已经记住了,
- * 再起草只会把同一条路线抄一遍。只走了几步批量(do_steps)的照常起草,那是模型自己规划的。
+ * Mika 默认有回放对上的步就不重复起草;MP 策略只跳过完整成功、无新增指令/动作的复跑学习。
+ * 只走了几步批量(do_steps)的照常起草,那是模型自己规划的。
  */
 class RunLearning(
     private val switches: MemorySwitches,
@@ -81,10 +82,12 @@ class RunLearning(
     private val yieldToForeground: suspend () -> Unit = {},
     private val appDrafter: AppKnowledgeDrafter? = null,
     private val appDrafts: AppKnowledgeDraftStore? = null,
+    private val skillPolicy: com.wangzan101.mika.core.skills.SkillLearningPolicy = com.wangzan101.mika.core.skills.SkillLearningPolicy.Default,
 ) {
     suspend fun learn(a: RunAftermath): RunNotes {
         yieldToForeground()
         val events = guarded(emptyList()) { a.events() }
+        val reused = skillPolicy.skipExtractionOnReplay && completedReuse(a, events)
         val used = events.filterIsInstance<RunEvent.SkillUsed>()
         val skillNotes = recordOutcomes(used, a.end, a.outcome).toMutableList()
         // 试用中的 App 知识和个人技能按同一种结果算:取消的、没判成的不记
@@ -98,7 +101,7 @@ class RunLearning(
         // 没有运行编号就没处挂提示,用户看不到也撤销不了:不提取
         val learnable = a.origin == RunOrigin.Ui && a.end is TaskState.Succeeded
         val readWeb = events.filterIsInstance<RunEvent.Observed>().any { it.place?.kind in setOf(PlaceKind.Site, PlaceKind.Page) }
-        if (learnable && !readWeb && a.runId != null && store != null && extractor != null && switches.autoRemember && a.utterances.isNotEmpty()) {
+        if (learnable && !reused && !readWeb && a.runId != null && store != null && extractor != null && switches.autoRemember && a.utterances.isNotEmpty()) {
             val now = store.clock()
             changes += guarded(emptyList()) {
                 yieldToForeground()
@@ -112,8 +115,21 @@ class RunLearning(
         val done = learnable && LearnGate.done(a.end, a.outcome)
         if (done) draft(a, events, used.map { it.name }.distinct())?.let(skillNotes::add)
         // App 知识也从没办成、磕磕绊绊的运行里学(值不值得由 AppKnowledgeDrafter 按经过判)
-        if (a.origin == RunOrigin.Ui) skillNotes += draftApps(a, events)
+        if (a.origin == RunOrigin.Ui && !reused) skillNotes += draftApps(a, events)
         return RunNotes(a.conversationId, a.runId.orEmpty(), MemoryExtractor.notes(changes), a.usedMemory, skillNotes)
+    }
+
+    /** A failed/partial replay, a new instruction, or model-planned actions can contain new experience. */
+    private fun completedReuse(a: RunAftermath, events: List<RunEvent>): Boolean {
+        if (!LearnGate.done(a.end, a.outcome) || a.utterances.size > 1 ||
+            events.any { it is RunEvent.State && it.name == "steer_received" }) return false
+        val replay = events.filterIsInstance<RunEvent.Replay>()
+        val last = replay.lastOrNull() ?: return false
+        if (last.total <= 0 || replay.size != last.total || replay.withIndex().any { (i, e) ->
+                !e.matched || e.routeId != last.routeId || e.total != last.total || e.step != i + 1
+            }) return false
+        val afterReplay = events.drop(events.indexOfLast { it is RunEvent.Replay } + 1)
+        return ActionDigest.of(afterReplay, a.tools).isEmpty()
     }
 
     /** 每份技能单独读改写(和别的任务同时记结果也不丢);一份出错不影响别的。 */
@@ -135,19 +151,23 @@ class RunLearning(
         val d = drafter ?: return null
         val runId = a.runId ?: return null
         if (!switches.learnSkills) return null
-        if (events.any { it is RunEvent.Replay && it.matched }) return null
+        if (if (skillPolicy.skipExtractionOnReplay) completedReuse(a, events)
+            else events.any { it is RunEvent.Replay && it.matched }) return null
         // 照着个人技能做成的只记一次结果,不再起草
         val followed = used.firstOrNull().takeIf { SkillOutcomes.resultOf(a.end, a.outcome) == SkillResult.verified }
         val done = a.end as? TaskState.Succeeded
-        if (Eligibility.check(events, followed, a.tools, done = LearnGate.done(a.end, a.outcome)) != null) return null
+        if (Eligibility.check(events, followed, a.tools, done = LearnGate.done(a.end, a.outcome), minimumActions = skillPolicy.minimumActions) != null) return null
+        val input = DraftInput(runId, a.goal, done?.answer.orEmpty(), done?.sources.orEmpty(), events, a.toolNames, a.tools)
+        if (!skillPolicy.shouldDraft(input, skills)) return null
         val r = guarded(null) {
             yieldToForeground()
-            d.draft(DraftInput(runId, a.goal, done?.answer.orEmpty(), done?.sources.orEmpty(), events, a.toolNames, a.tools), skills, catalog)
+            if (!skillPolicy.shouldDraft(input, skills)) return@guarded null
+            d.draft(input, skills, catalog)
         }
         val draft = r as? DraftResult.Draft ?: return null
         // 是对一份待确认草稿的更新:写回那份草稿,不另起一份
         val id = draft.replacesPending ?: ids()
-        guarded(Unit) { skills.putPending(id, draft.skill) }
+        guarded(Unit) { skills.putPending(id, skillPolicy.decorate(input, draft.skill)) }
         if (autoApprove) {
             guarded(null) { skills.approve(id) }
             return null
