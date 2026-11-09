@@ -93,6 +93,7 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
     var projectEditorId by remember { mutableStateOf<String?>(null) }
     var projectEditorName by remember { mutableStateOf("") }
     var projectEditorDescription by remember { mutableStateOf("") }
+    var projectEditorTargetApp by remember { mutableStateOf("") }
     var pendingProjectDelete by remember { mutableStateOf<String?>(null) }
     var suiteEditorId by remember { mutableStateOf<String?>(null) }
     var suiteEditorName by remember { mutableStateOf("") }
@@ -106,6 +107,11 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
     var editorLabels by remember { mutableStateOf("") }
     var pendingImport by remember { mutableStateOf<TestTaskContract?>(null) }
     var pendingDelete by remember { mutableStateOf<String?>(null) }
+    var pendingMove by remember { mutableStateOf<ManagedTestCase?>(null) }
+    var moveProjectId by remember { mutableStateOf("") }
+    var moveSuiteId by remember { mutableStateOf("") }
+    var pendingSuiteRun by remember { mutableStateOf<List<ManagedTestCase>?>(null) }
+    var historyProjectFilter by remember { mutableStateOf<String?>(null) }
     var pendingExport by remember { mutableStateOf("") }
     var pendingExportName by remember { mutableStateOf("") }
     var pendingReportFile by remember { mutableStateOf<File?>(null) }
@@ -114,8 +120,12 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
     fun refreshCases() {
         projects = repository.projects()
         suites = repository.suites(selectedProjectId)
-        cases = repository.search(projectId = selectedProjectId, suiteId = selectedSuiteId, query = query)
+        val found = repository.search(projectId = selectedProjectId, suiteId = selectedSuiteId, query = query)
             .filter { it.archived == showArchived }
+        cases = if (selectedSuiteId != null && !showArchived) {
+            val order = repository.orderedCases(selectedProjectId, selectedSuiteId!!).mapIndexed { index, case -> case.id to index }.toMap()
+            found.sortedBy { order[it.id] ?: Int.MAX_VALUE }
+        } else found
     }
 
     fun beginEdit(record: ManagedTestCase?) {
@@ -136,7 +146,8 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
         runCatching {
             context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { TestTaskContracts.parse(it.readText()) }
                 ?: error("empty file")
-        }.onSuccess { contract ->
+        }.onSuccess { importedContract ->
+            val contract = importedContract.copy(targetApp = importedContract.targetApp ?: repository.project(selectedProjectId)?.targetApp)
             error = null
             if (repository.case(contract.id) == null) {
                 repository.importCase(contract, TestCaseImportPolicy.REQUIRE_CHOICE, selectedProjectId, importSuiteId())
@@ -200,25 +211,46 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
         TestWorkspaceSection.Projects -> {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 MikaButton(stringResource(R.string.test_workspace_new_project), onClick = {
-                    projectEditorOpen = true; projectEditorId = null; projectEditorName = ""; projectEditorDescription = ""; error = null
+                    projectEditorOpen = true; projectEditorId = null; projectEditorName = ""; projectEditorDescription = ""; projectEditorTargetApp = ""; error = null
                 }, modifier = Modifier.weight(1f), size = ButtonSize.Medium)
                 TextButton(onClick = { showArchivedProjects = !showArchivedProjects }) {
                     Text(if (showArchivedProjects) stringResource(R.string.test_workspace_show_active) else stringResource(R.string.test_workspace_show_archived))
                 }
             }
             val visibleProjects = repository.projects(includeArchived = showArchivedProjects).filter { it.archived == showArchivedProjects }
+            val knownTestRuns = runRepository.testRuns()
             GroupLabel(if (showArchivedProjects) stringResource(R.string.test_workspace_archived) else stringResource(R.string.test_workspace_project))
             if (visibleProjects.isEmpty()) EmptyNote(stringResource(R.string.test_workspace_no_projects))
             visibleProjects.forEach { project ->
+                val projectCases = repository.search(projectId = project.id, includeArchived = true)
+                val projectSuites = repository.suites(project.id)
+                val projectRuns = projectCases.flatMap { repository.executions(it.id) }
+                    .filter { it.projectId == project.id }
+                    .mapNotNull { snapshot -> knownTestRuns.firstOrNull { runRepository.identity(it.goal)?.executionId == snapshot.executionId } }
+                    .distinctBy { it.id }.sortedByDescending { it.startedAtMs }.take(5)
                 GroupCard {
                     Column(Modifier.fillMaxWidth().padding(16.dp)) {
                         Text(project.name, style = MikaType.BodyStrong, color = MikaTheme.colors.ink)
                         project.description.takeIf(String::isNotBlank)?.let { Text(it, Modifier.padding(top = 4.dp), style = MikaType.Caption, color = MikaTheme.colors.ink3) }
+                        Text("${projectSuites.size} 个套件 · ${projectCases.count { !it.archived }} 个有效用例${project.targetApp?.let { " · $it" }.orEmpty()}", Modifier.padding(top = 6.dp), style = MikaType.Hint, color = MikaTheme.colors.ink3)
+                        if (projectRuns.isNotEmpty()) {
+                            GroupLabel("最近运行")
+                            projectRuns.forEach { run ->
+                                val result = run.judged ?: run.outcome ?: if (run.endedAtMs == null) "运行中" else "结果未知"
+                                TextButton(onClick = { historyProjectFilter = project.id; runs = projectRuns; section = TestWorkspaceSection.History }) {
+                                    Text("${DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(run.startedAtMs))} · $result · 报告")
+                                }
+                            }
+                        }
                         Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            TextButton(onClick = {
+                            if (!project.archived) TextButton(onClick = {
                                 projectEditorOpen = true; projectEditorId = project.id; projectEditorName = project.name
-                                projectEditorDescription = project.description; error = null
+                                projectEditorDescription = project.description; projectEditorTargetApp = project.targetApp.orEmpty(); error = null
                             }) { Text(stringResource(R.string.test_workspace_edit)) }
+                            TextButton(enabled = !project.archived, onClick = { selectedProjectId = project.id; section = TestWorkspaceSection.Suites }) { Text("打开项目") }
+                            TextButton(enabled = !project.archived && projectCases.any { !it.archived }, onClick = {
+                                pendingSuiteRun = projectSuites.flatMap { repository.orderedCases(project.id, it.id) }
+                            }) { Text("运行项目") }
                             if (project.id != TestCaseRepository.DEFAULT_PROJECT) {
                         TextButton(onClick = {
                                     runCatching {
@@ -230,7 +262,7 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
                                             }
                                         }
                                         repository.archiveProject(project.id, !project.archived)
-                                        if (selectedProjectId == project.id && project.archived) selectedProjectId = repository.projects().firstOrNull()?.id ?: TestCaseRepository.DEFAULT_PROJECT
+                                        if (selectedProjectId == project.id && !project.archived) selectedProjectId = repository.projects().firstOrNull()?.id ?: TestCaseRepository.DEFAULT_PROJECT
                                         refreshCases()
                                     }.onFailure { error = it.message }
                                 }) { Text(stringResource(if (project.archived) R.string.test_workspace_restore else R.string.test_workspace_archive)) }
@@ -255,6 +287,7 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
             val visibleSuites = repository.suites(selectedProjectId)
             if (visibleSuites.isEmpty()) EmptyNote(stringResource(R.string.test_workspace_no_suites))
             visibleSuites.forEach { suite ->
+                val suiteCases = repository.orderedCases(selectedProjectId, suite.id)
                 val suiteCaseCount = repository.search(projectId = selectedProjectId, suiteId = suite.id, includeArchived = true).size
                 GroupCard {
                     Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -263,6 +296,7 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
                             Text(stringResource(R.string.test_workspace_suite_case_count, suiteCaseCount), style = MikaType.Hint, color = MikaTheme.colors.ink3)
                         }
                         TextButton(onClick = { suiteEditorId = suite.id; suiteEditorName = suite.name; error = null }) { Text(stringResource(R.string.test_workspace_edit)) }
+                        TextButton(enabled = suiteCases.isNotEmpty(), onClick = { pendingSuiteRun = suiteCases }) { Text("运行整套") }
                         if (suite.id != TestCaseRepository.DEFAULT_SUITE) TextButton(enabled = suiteCaseCount == 0, onClick = { pendingSuiteDelete = suite.id }) { Text(stringResource(R.string.test_workspace_delete)) }
                     }
                 }
@@ -333,6 +367,7 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
                             }
                             if (!record.archived) {
                                 TextButton(onClick = { beginEdit(record) }) { Text(stringResource(R.string.test_workspace_edit)) }
+                                TextButton(onClick = { pendingMove = record; moveProjectId = record.projectId; moveSuiteId = record.suiteId }) { Text("移动") }
                                 TextButton(onClick = {
                                     runCatching {
                                         val revision = record.current
@@ -363,6 +398,18 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
                         if (expandedCaseId == record.id) {
                             GroupLabel(stringResource(R.string.test_workspace_suite))
                             Text(suites.firstOrNull { it.id == record.suiteId }?.name.orEmpty(), style = MikaType.Caption, color = MikaTheme.colors.ink2)
+                            val ordered = repository.orderedCases(record.projectId, record.suiteId)
+                            val orderIndex = ordered.indexOfFirst { it.id == record.id }
+                            Row {
+                                TextButton(enabled = orderIndex > 0, onClick = {
+                                    val ids = ordered.map { it.id }.toMutableList(); java.util.Collections.swap(ids, orderIndex, orderIndex - 1)
+                                    repository.reorderSuiteCases(record.suiteId, ids); refreshCases()
+                                }) { Text("上移") }
+                                TextButton(enabled = orderIndex >= 0 && orderIndex < ordered.lastIndex, onClick = {
+                                    val ids = ordered.map { it.id }.toMutableList(); java.util.Collections.swap(ids, orderIndex, orderIndex + 1)
+                                    repository.reorderSuiteCases(record.suiteId, ids); refreshCases()
+                                }) { Text("下移") }
+                            }
                             GroupLabel(stringResource(R.string.test_workspace_steps))
                             if (contract.steps.isEmpty()) Text("—", style = MikaType.Caption, color = MikaTheme.colors.ink3)
                             else contract.steps.forEachIndexed { index, step ->
@@ -396,6 +443,7 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
         }
         TestWorkspaceSection.History -> {
             GroupLabel(stringResource(R.string.test_workspace_history))
+            historyProjectFilter?.let { id -> Text("项目：${repository.project(id)?.name ?: "已删除项目"}", style = MikaType.Caption, color = MikaTheme.colors.ink3) }
             if (runs.isEmpty()) EmptyNote(stringResource(R.string.test_workspace_no_runs))
             else runs.forEach { run ->
                 val identity = runRepository.identity(run.goal)
@@ -417,6 +465,7 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
                             color = if (run.endedAtMs == null) MikaTheme.colors.warn else MikaTheme.colors.ink2,
                             modifier = Modifier.padding(top = 4.dp),
                         )
+                        snapshot?.let { Text("项目：${it.projectName}", style = MikaType.Hint, color = MikaTheme.colors.ink3, modifier = Modifier.padding(top = 3.dp)) }
                         if (identity != null) Text(
                             "${stringResource(R.string.test_workspace_case_id)} ${identity.caseId} · v${identity.caseVersion ?: "?"}",
                             style = MikaType.Hint,
@@ -483,7 +532,7 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
                         if (existing == null) {
                             val id = "case-${UUID.randomUUID().toString().replace("-", "").take(12)}"
                             repository.createCase(
-                                TestTaskContract(id = id, name = editorName.trim(), command = editorCommand.trim(), targetApp = editorTargetApp.trim().ifBlank { null }, modelPolicy = TestModelPolicy("configured", "workspace-v1")),
+                                TestTaskContract(id = id, name = editorName.trim(), command = editorCommand.trim(), targetApp = editorTargetApp.trim().ifBlank { repository.project(selectedProjectId)?.targetApp }, modelPolicy = TestModelPolicy("configured", "workspace-v1")),
                                 selectedProjectId,
                                 suite.id,
                                 labels,
@@ -515,6 +564,7 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
                 Column {
                     OutlinedTextField(projectEditorName, { projectEditorName = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.test_workspace_project_name)) }, singleLine = true)
                     OutlinedTextField(projectEditorDescription, { projectEditorDescription = it }, Modifier.fillMaxWidth().padding(top = 8.dp), label = { Text(stringResource(R.string.test_workspace_project_description)) }, minLines = 2)
+                    OutlinedTextField(projectEditorTargetApp, { projectEditorTargetApp = it }, Modifier.fillMaxWidth().padding(top = 8.dp), label = { Text(stringResource(R.string.test_workspace_target_app) + "（可选，包名）") }, singleLine = true)
                     error?.let { Text(it, Modifier.padding(top = 8.dp), style = MikaType.Caption, color = MikaTheme.colors.bad) }
                 }
             },
@@ -522,12 +572,12 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
                 runCatching {
                     val id = projectEditorId
                     if (id == null) {
-                        val project = repository.createProject(projectEditorName, projectEditorDescription)
+                        val project = repository.createProject(projectEditorName, projectEditorDescription, projectEditorTargetApp)
                         repository.createSuite(project.id, "General")
                         selectedProjectId = project.id
                         selectedSuiteId = null
                     } else {
-                        repository.renameProject(id, projectEditorName, projectEditorDescription)
+                        repository.updateProject(id, projectEditorName, projectEditorDescription, projectEditorTargetApp)
                     }
                     projectEditorOpen = false
                     error = null
@@ -572,6 +622,89 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
                     .onFailure { pendingProjectDelete = null; error = it.message }
             }) { Text(stringResource(R.string.test_workspace_delete)) } },
             dismissButton = { TextButton(onClick = { pendingProjectDelete = null }) { Text(stringResource(R.string.test_workspace_cancel)) } },
+        )
+    }
+
+    pendingMove?.let { record ->
+        val targetSuites = repository.suites(moveProjectId)
+        AlertDialog(
+            onDismissRequest = { pendingMove = null },
+            title = { Text("移动用例") },
+            text = {
+                Column {
+                    var projectMenuOpen by remember { mutableStateOf(false) }
+                    var targetSuiteMenuOpen by remember { mutableStateOf(false) }
+                    TextButton(onClick = { projectMenuOpen = true }) { Text("项目：${repository.project(moveProjectId)?.name ?: "选择项目"} ▾") }
+                    DropdownMenu(expanded = projectMenuOpen, onDismissRequest = { projectMenuOpen = false }) {
+                        repository.projects().forEach { project ->
+                            DropdownMenuItem(text = { Text(project.name) }, onClick = {
+                                moveProjectId = project.id
+                                moveSuiteId = repository.suites(project.id).firstOrNull { it.name.equals("General", true) }?.id
+                                    ?: repository.suites(project.id).firstOrNull()?.id.orEmpty()
+                                projectMenuOpen = false
+                            })
+                        }
+                    }
+                    TextButton(onClick = { targetSuiteMenuOpen = true }, enabled = targetSuites.isNotEmpty()) {
+                        Text("套件：${targetSuites.firstOrNull { it.id == moveSuiteId }?.name ?: "选择套件"} ▾")
+                    }
+                    DropdownMenu(expanded = targetSuiteMenuOpen, onDismissRequest = { targetSuiteMenuOpen = false }) {
+                        targetSuites.forEach { suite -> DropdownMenuItem(text = { Text(suite.name) }, onClick = { moveSuiteId = suite.id; targetSuiteMenuOpen = false }) }
+                    }
+                    val targetProject = repository.project(moveProjectId)
+                    if (record.current.contract.targetApp != null && targetProject?.targetApp != null && record.current.contract.targetApp != targetProject.targetApp) {
+                        Text("目标 App 与项目默认值不同；移动会保留用例中的目标 App。", style = MikaType.Caption, color = MikaTheme.colors.warn)
+                    }
+                    Text("移动会保留用例版本和历史。", style = MikaType.Caption, color = MikaTheme.colors.ink3)
+                }
+            },
+            confirmButton = { TextButton(enabled = targetSuites.any { it.id == moveSuiteId }, onClick = {
+                runCatching { repository.move(record.id, moveProjectId, moveSuiteId) }
+                    .onSuccess { pendingMove = null; selectedProjectId = moveProjectId; selectedSuiteId = moveSuiteId; refreshCases() }
+                    .onFailure { error = it.message }
+            }) { Text("移动") } },
+            dismissButton = { TextButton(onClick = { pendingMove = null }) { Text(stringResource(R.string.test_workspace_cancel)) } },
+        )
+    }
+
+    pendingSuiteRun?.let { suiteCases ->
+        AlertDialog(
+            onDismissRequest = { pendingSuiteRun = null },
+            title = { Text("运行整套用例") },
+            text = { Text("将按保存顺序运行 ${suiteCases.size} 个用例。单项明确通过或失败后继续；状态未知或等待超时则停止。真实交易仍会按现有安全机制确认。") },
+            confirmButton = { TextButton(onClick = {
+                val casesToRun = suiteCases.toList()
+                pendingSuiteRun = null
+                section = TestWorkspaceSection.History
+                scope.launch {
+                    for (case in casesToRun) {
+                        val project = repository.project(case.projectId) ?: break
+                        if (project.archived) break
+                        val revision = case.current
+                        val receipt = try {
+                            executor.start(revision.contract, caseId = case.id, caseVersion = revision.version)
+                        } catch (failure: Exception) {
+                            error = failure.message
+                            break
+                        }
+                        repository.recordExecution(case.id, revision.version, receipt.executionId, receipt.startedAtMs)
+                        var completed: com.wangzan101.mika.core.record.RunSummary? = null
+                        val deadline = System.currentTimeMillis() + 10 * 60 * 1000L
+                        while (completed == null && System.currentTimeMillis() < deadline) {
+                            delay(500)
+                            completed = runRepository.testRuns().firstOrNull { runRepository.identity(it.goal)?.executionId == receipt.executionId && it.endedAtMs != null }
+                        }
+                        val result = completed?.outcome.orEmpty().lowercase()
+                        val known = result == "succeeded" || result == "failed"
+                        if (!known) {
+                            error = "整套运行已停止：用例 ${case.current.contract.name} 状态未知或等待超时。"
+                            break
+                        }
+                    }
+                    runs = runRepository.testRuns()
+                }
+            }) { Text("确认运行") } },
+            dismissButton = { TextButton(onClick = { pendingSuiteRun = null }) { Text(stringResource(R.string.test_workspace_cancel)) } },
         )
     }
 

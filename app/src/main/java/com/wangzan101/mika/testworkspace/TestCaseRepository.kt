@@ -16,10 +16,11 @@ data class TestCaseProject(
     val createdAtMs: Long,
     val description: String = "",
     val archived: Boolean = false,
+    val targetApp: String? = null,
 )
 
 @Serializable
-data class TestCaseSuite(val id: String, val projectId: String, val name: String, val createdAtMs: Long)
+data class TestCaseSuite(val id: String, val projectId: String, val name: String, val createdAtMs: Long, val caseOrder: List<String> = emptyList())
 
 @Serializable
 data class TestCaseRevision(val version: Int, val contract: TestTaskContract, val savedAtMs: Long)
@@ -44,6 +45,8 @@ data class TestCaseExecutionSnapshot(
     val caseVersion: Int,
     val contract: TestTaskContract,
     val startedAtMs: Long,
+    val projectId: String = "default",
+    val projectName: String = "Default project",
 )
 
 @Serializable
@@ -88,6 +91,12 @@ class TestCaseRepository(
         database.projects.filter { includeArchived || !it.archived }
     @Synchronized fun project(id: String): TestCaseProject? = database.projects.firstOrNull { it.id == id }
     @Synchronized fun suites(projectId: String): List<TestCaseSuite> = database.suites.filter { it.projectId == projectId }
+    @Synchronized fun orderedCases(projectId: String, suiteId: String): List<ManagedTestCase> {
+        val suite = database.suites.firstOrNull { it.id == suiteId && it.projectId == projectId } ?: return emptyList()
+        val cases = database.cases.filter { it.projectId == projectId && it.suiteId == suiteId && !it.archived }
+        val byId = cases.associateBy { it.id }
+        return suite.caseOrder.mapNotNull(byId::get) + cases.filter { it.id !in suite.caseOrder }
+    }
     @Synchronized fun case(id: String): ManagedTestCase? = database.cases.firstOrNull { it.id == id }
     @Synchronized fun executions(caseId: String? = null): List<TestCaseExecutionSnapshot> =
         database.executions.filter { caseId == null || it.caseId == caseId }.sortedByDescending { it.startedAtMs }
@@ -111,10 +120,10 @@ class TestCaseRepository(
         .toList()
 
     @Synchronized
-    fun createProject(name: String, description: String = ""): TestCaseProject {
+    fun createProject(name: String, description: String = "", targetApp: String? = null): TestCaseProject {
         require(name.isNotBlank()) { "project name must not be blank" }
         require(database.projects.none { it.name.equals(name.trim(), true) }) { "project already exists" }
-        val project = TestCaseProject(uniqueId("project"), name.trim(), clock(), description.trim())
+        val project = TestCaseProject(uniqueId("project"), name.trim(), clock(), description.trim(), targetApp = targetApp?.trim()?.ifBlank { null })
         database = database.copy(projects = database.projects + project)
         persist()
         return project
@@ -126,6 +135,15 @@ class TestCaseRepository(
         require(database.projects.none { it.id != projectId && it.name.equals(name.trim(), true) }) { "project already exists" }
         val old = requireNotNull(database.projects.firstOrNull { it.id == projectId }) { "project does not exist" }
         val updated = old.copy(name = name.trim(), description = description?.trim() ?: old.description)
+        database = database.copy(projects = database.projects.map { if (it.id == projectId) updated else it })
+        persist()
+        return updated
+    }
+
+    @Synchronized
+    fun updateProject(projectId: String, name: String, description: String, targetApp: String?): TestCaseProject {
+        val renamed = renameProject(projectId, name, description)
+        val updated = renamed.copy(targetApp = targetApp?.trim()?.ifBlank { null })
         database = database.copy(projects = database.projects.map { if (it.id == projectId) updated else it })
         persist()
         return updated
@@ -244,11 +262,29 @@ class TestCaseRepository(
     @Synchronized
     fun move(caseId: String, projectId: String, suiteId: String): ManagedTestCase {
         val old = requireNotNull(case(caseId)) { "case does not exist" }
+        require(database.projects.any { it.id == projectId && !it.archived }) { "target project is archived or missing" }
         require(database.suites.any { it.id == suiteId && it.projectId == projectId }) { "suite does not exist in project" }
+        if (old.projectId == projectId && old.suiteId == suiteId) return old
+        database = database.copy(suites = database.suites.map { suite ->
+            when (suite.id) {
+                old.suiteId -> suite.copy(caseOrder = suite.caseOrder.filterNot { it == caseId })
+                suiteId -> suite.copy(caseOrder = (suite.caseOrder.filterNot { it == caseId } + caseId))
+                else -> suite
+            }
+        })
         val moved = old.copy(projectId = projectId, suiteId = suiteId)
         replaceCase(moved)
         persist()
         return moved
+    }
+
+    @Synchronized
+    fun reorderSuiteCases(suiteId: String, orderedCaseIds: List<String>) {
+        val suite = requireNotNull(database.suites.firstOrNull { it.id == suiteId }) { "suite does not exist" }
+        val activeIds = database.cases.filter { it.suiteId == suiteId && !it.archived }.map { it.id }.toSet()
+        require(orderedCaseIds.toSet() == activeIds && orderedCaseIds.size == activeIds.size) { "order must contain each active suite case once" }
+        database = database.copy(suites = database.suites.map { if (it.id == suiteId) it.copy(caseOrder = orderedCaseIds) else it })
+        persist()
     }
 
     @Synchronized
@@ -270,9 +306,11 @@ class TestCaseRepository(
     @Synchronized
     fun recordExecution(caseId: String, version: Int, executionId: String, startedAtMs: Long = clock()): TestCaseExecutionSnapshot {
         require(database.executions.none { it.executionId == executionId }) { "execution id already exists" }
-        val revision = requireNotNull(case(caseId)) { "case does not exist" }.revisions.firstOrNull { it.version == version }
+        val managedCase = requireNotNull(case(caseId)) { "case does not exist" }
+        val revision = managedCase.revisions.firstOrNull { it.version == version }
             ?: error("case revision does not exist")
-        val snapshot = TestCaseExecutionSnapshot(executionId, caseId, revision.version, revision.contract, startedAtMs)
+        val project = requireNotNull(project(managedCase.projectId)) { "case project does not exist" }
+        val snapshot = TestCaseExecutionSnapshot(executionId, caseId, revision.version, revision.contract, startedAtMs, project.id, project.name)
         database = database.copy(executions = database.executions + snapshot)
         persist()
         return snapshot

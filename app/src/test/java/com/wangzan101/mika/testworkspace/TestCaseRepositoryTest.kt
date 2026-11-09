@@ -113,6 +113,31 @@ class TestCaseRepositoryTest {
         assertTrue(repository.deleteProject(project.id))
     }
 
+    @Test fun projectDefaultsAndMoveKeepRunOwnershipAndSuiteOrder() {
+        val repository = TestCaseRepository(Files.createTempDirectory("case-move").toFile(), legacyTasksDir = FileAbsent)
+        val shop = repository.createProject("Shop")
+        val billing = repository.createProject("Billing")
+        repository.updateProject(billing.id, billing.name, billing.description, "com.example.billing")
+        val source = repository.createSuite(shop.id, "Checkout")
+        val target = repository.createSuite(billing.id, "Payments")
+        val first = repository.createCase(contract("first"), shop.id, source.id)
+        val second = repository.createCase(contract("second"), shop.id, source.id)
+        repository.reorderSuiteCases(source.id, listOf(second.id, first.id))
+        assertEquals(listOf(second.id, first.id), repository.orderedCases(shop.id, source.id).map { it.id })
+
+        val snapshot = repository.recordExecution(first.id, 1, "move-exec", 100L)
+        repository.move(first.id, billing.id, target.id)
+
+        assertEquals(billing.id, repository.case(first.id)?.projectId)
+        assertEquals(1, repository.case(first.id)?.currentVersion)
+        assertEquals(shop.id, repository.execution("move-exec")?.projectId)
+        assertEquals("Shop", snapshot.projectName)
+        assertEquals(listOf(second.id), repository.orderedCases(shop.id, source.id).map { it.id })
+        assertEquals(listOf(first.id), repository.orderedCases(billing.id, target.id).map { it.id })
+        repository.archiveProject(billing.id, true)
+        assertTrue(runCatching { repository.move(second.id, billing.id, target.id) }.isFailure)
+    }
+
     private companion object {
         val FileAbsent = Files.createTempDirectory("no-legacy").resolve("absent").toFile()
     }
