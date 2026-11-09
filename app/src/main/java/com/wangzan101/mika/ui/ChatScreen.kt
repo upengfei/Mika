@@ -326,6 +326,15 @@ fun ChatScreen(
             if (reduceMotion) lift.snapTo(1f) else lift.animateTo(1f, tween(MENU_IN_MS, easing = MikaMotion.Decelerate))
         }
     }
+    LaunchedEffect(ui.pendingSharedDraft, ui.sharedDraft) {
+        if (ui.pendingSharedDraft != null || ui.sharedDraft != null) {
+            pendingExample = null
+            if (menu != null) {
+                lift.snapTo(0f)
+                menu = null
+            }
+        }
+    }
     /** 收起菜单:倒着放一遍出现的动画,放完再清掉;[then] 当场做。 */
     fun closeMenu(then: () -> Unit = {}) {
         then()
@@ -438,7 +447,7 @@ fun ChatScreen(
             onStartQueued = vm::startQueued,
             followUpStatus = last?.status?.takeIf { it.isActive() },
             attachPanel = if (ui.attachEnabled && (ui.composer == ComposerMode.Idle ||
-                    (ui.composer == ComposerMode.Busy && ui.followUpMode == FollowUpMode.Queue))) ({
+                    (ui.composer != ComposerMode.Idle && ui.followUpMode == FollowUpMode.Queue))) ({
                 androidx.compose.runtime.key(ui.conversationId) {
                     AttachPanelHost(ui.attachments, onPicked = { vm.attach(it, ui.conversationId) }, onToggle = vm::toggleAttachment)
                 }
@@ -564,6 +573,30 @@ fun ChatScreen(
                 ) { Text(stringResource(R.string.chat_example_replace_action)) }
             },
             dismissButton = { TextButton({ pendingExample = null }) { Text(stringResource(R.string.cancel)) } },
+        )
+    }
+
+    if (ui.pendingSharedDraft != null) {
+        MikaDialog(
+            onDismissRequest = vm::cancelPendingSharedDraft,
+            title = { Text(stringResource(R.string.chat_example_replace_title)) },
+            text = { Text(stringResource(R.string.share_draft_replace_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (!vm.confirmPendingSharedDraft()) {
+                            Toast.makeText(context, R.string.share_draft_failed, Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    Modifier.testTag("confirm-replace-shared-draft"),
+                ) { Text(stringResource(R.string.chat_example_replace_action)) }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = vm::cancelPendingSharedDraft,
+                    Modifier.testTag("cancel-replace-shared-draft"),
+                ) { Text(stringResource(R.string.cancel)) }
+            },
         )
     }
 }
@@ -1419,7 +1452,9 @@ internal fun Composer(
     ) {
         Column(Modifier.fillMaxWidth()) {
             testCaseSuggestions?.invoke()
-            if (busy) FollowUpModeBar(followUpMode, onFollowUpMode, followUpStatus)
+            if (busy || (mode == ComposerMode.Answer && attachments.isNotEmpty())) {
+                FollowUpModeBar(followUpMode, onFollowUpMode, followUpStatus)
+            }
             FollowUpTray(queued, active = mode != ComposerMode.Idle, onEdit = onEditQueued, onCancel = onCancelQueued, onStartNow = onStartQueued)
             quote?.let { QuoteChip(it, onRemoveQuote, Modifier.padding(bottom = 6.dp)) }
             if (attachments.isNotEmpty()) PendingTray(attachments, onRemove, Modifier.padding(bottom = 2.dp))

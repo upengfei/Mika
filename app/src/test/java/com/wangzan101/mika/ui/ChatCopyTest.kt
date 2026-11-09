@@ -19,6 +19,9 @@ class ChatCopyTest {
         assertEquals(3, ChatCopy.examples.size)
         assertEquals(3, ChatCopy.examples.map { it.kind }.toSet().size)
         assertEquals(3, ChatCopy.examples.map { it.text }.filter { it.isNotBlank() }.toSet().size)
+        val examples = ChatCopy.examples
+        assertEquals(ChatCopy.ExampleKind.Web, examples.first().kind)
+        assertTrue(examples.first().text.contains("https://github.com/wangzan101/mika"))
     }
 
     /** 分支标题:源标题后面加后缀,总长不超过 24 字;截的是源标题,后缀留着,emoji 不截半个。 */
