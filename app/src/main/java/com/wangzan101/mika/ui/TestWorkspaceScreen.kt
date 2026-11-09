@@ -34,6 +34,10 @@ import com.wangzan101.mika.core.automation.TestTaskContract
 import com.wangzan101.mika.core.automation.TestTaskContracts
 import com.wangzan101.mika.core.automation.TestTaskFormat
 import com.wangzan101.mika.record.RunStore
+import com.wangzan101.mika.testworkspace.TestCaseReplayStatus
+import com.wangzan101.mika.testworkspace.TestCaseReplayState
+import com.wangzan101.mika.testworkspace.rememberTestCaseReplayStates
+import com.wangzan101.mika.testworkspace.testRunResult
 import com.wangzan101.mika.testworkspace.ManagedTestCase
 import com.wangzan101.mika.testworkspace.TestCaseImportPolicy
 import com.wangzan101.mika.testworkspace.TestCaseProject
@@ -82,6 +86,7 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
     var suites by remember { mutableStateOf(repository.suites(selectedProjectId)) }
     var selectedSuiteId by remember { mutableStateOf<String?>(null) }
     var cases by remember { mutableStateOf(repository.search(projectId = selectedProjectId)) }
+    val replayStates = rememberTestCaseReplayStates(if (section == TestWorkspaceSection.Cases) cases else emptyList())
     var runs by remember { mutableStateOf(runRepository.testRuns()) }
     var query by remember { mutableStateOf("") }
     var showArchived by remember { mutableStateOf(false) }
@@ -361,6 +366,7 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
                             color = MikaTheme.colors.ink3,
                             modifier = Modifier.padding(top = 4.dp),
                         )
+                        TestCaseReplayStatus(replayStates[record.id] ?: TestCaseReplayState.SAVED, Modifier.padding(top = 4.dp))
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
                             TextButton(onClick = { expandedCaseId = if (expandedCaseId == record.id) null else record.id }) {
                                 Text(if (expandedCaseId == record.id) stringResource(R.string.test_workspace_hide_details) else stringResource(R.string.test_workspace_details))
@@ -419,6 +425,9 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
                             if (contract.assertions.isEmpty()) Text("—", style = MikaType.Caption, color = MikaTheme.colors.ink3)
                             else contract.assertions.forEach { assertion ->
                                 Text("${assertion.kind.name} · ${assertion.description}", style = MikaType.Caption, color = MikaTheme.colors.ink2, modifier = Modifier.padding(vertical = 3.dp))
+                                if (assertion.kind == com.wangzan101.mika.core.automation.TestAssertionKind.HARD) {
+                                    Text(assertion.expectedText?.let { "预期文字：$it" } ?: "待配置客观校验条件", style = MikaType.Hint, color = MikaTheme.colors.ink3)
+                                }
                             }
                             GroupLabel(stringResource(R.string.test_workspace_target_app))
                             Text(contract.targetApp ?: stringResource(R.string.test_workspace_target_unspecified), style = MikaType.Caption, color = MikaTheme.colors.ink2)
@@ -451,6 +460,12 @@ fun TestWorkspaceScreen(context: Context, onBack: () -> Unit) {
                 val caseRecord = identity?.caseId?.let(repository::case)
                 val status = when {
                     run.endedAtMs == null -> stringResource(R.string.test_workspace_running)
+                    run.verdict != null -> when (testRunResult(run)) {
+                        "pass" -> "断言通过"
+                        "fail" -> "断言失败"
+                        "cannot_verify" -> "待验证"
+                        else -> testRunResult(run)
+                    }
                     run.judged != null -> run.judged
                     run.outcome != null -> run.outcome
                     else -> stringResource(R.string.test_workspace_result_unknown)

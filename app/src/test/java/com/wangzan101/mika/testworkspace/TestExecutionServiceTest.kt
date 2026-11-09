@@ -108,4 +108,28 @@ class TestExecutionServiceTest {
         assertFalse("sandbox secrets must not leave in report exports", exportedText.contains("sandbox-secret-123"))
         assertTrue("report archive survives RunStore pruning", archived.resolve("events.jsonl").isFile)
     }
+
+    @Test fun reportUsesAssertionVerdictAndIncludesVerificationFailureScreenshot() {
+        val store = com.wangzan101.mika.record.RunStore(tmp.root, { null }, 30, { 1_760_000_000_000L }, { it })
+        val handle = store.open("Test case id: checked\nTest case version: 1")
+        handle.event(com.wangzan101.mika.core.record.RunEvent.TaskEnded(2, "succeeded", "模型说完成"))
+        handle.event(com.wangzan101.mika.core.record.RunEvent.Verifier(3, "fail", """{"reason":"金额不匹配","screenshotId":999999}"""))
+        handle.media(999999, byteArrayOf(1, 2, 3))
+        handle.event(com.wangzan101.mika.core.record.RunEvent.OutcomeJudged(4, "done", "模型认为完成"))
+        handle.close()
+        val reports = TestRunRepository(store, File(tmp.root, "reports"))
+        val html = reports.archive(handle.runId).resolve("report.html").readText()
+        assertTrue(html.contains("Result: fail"))
+        assertTrue(html.contains("金额不匹配"))
+        assertTrue(html.contains("screens/999999.jpg"))
+        assertTrue(html.contains("data:image/jpeg;base64,AQID"))
+    }
+
+    @Test fun passingAssertionsCannotTurnAnIncompleteOrFailedTaskIntoAPass() {
+        val summary = com.wangzan101.mika.core.record.RunSummary("id", "goal", startedAtMs = 1, outcome = "succeeded", judged = "partial", verdict = "pass")
+        assertEquals("partial", testRunResult(summary))
+        assertEquals("failed", testRunResult(summary.copy(outcome = "failed", judged = "done")))
+        assertEquals("fail", testRunResult(summary.copy(verdict = "fail", judged = "done")))
+        assertEquals("cannot_verify", testRunResult(summary.copy(verdict = "cannot_verify", judged = "done")))
+    }
 }

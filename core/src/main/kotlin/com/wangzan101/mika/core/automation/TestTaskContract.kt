@@ -33,6 +33,8 @@ data class TestAssertionSpec(
     val kind: TestAssertionKind,
     val description: String,
     val required: Boolean = true,
+    /** HARD assertions compare this literal with fresh target-page evidence, never with an LLM verdict. */
+    val expectedText: String? = null,
 )
 
 @Serializable
@@ -93,6 +95,7 @@ object TestTaskContracts {
                 appendLine("assertions:")
                 contract.assertions.forEach {
                     appendLine("  - id: ${quote(it.id)}\n    kind: ${it.kind.name.lowercase()}\n    description: ${quote(it.description)}\n    required: ${it.required}")
+                    it.expectedText?.let { text -> appendLine("    expectedText: ${quote(text)}") }
                 }
             }
             appendLine("modelPolicy:\n  model: ${quote(contract.modelPolicy.model)}\n  promptVersion: ${quote(contract.modelPolicy.promptVersion)}")
@@ -110,6 +113,7 @@ object TestTaskContracts {
         if (contract.steps.any { it.id.isBlank() || it.instruction.isBlank() }) add("steps must have non-blank id and instruction")
         if (contract.steps.map { it.id }.distinct().size != contract.steps.size) add("step ids must be unique")
         if (contract.assertions.any { it.id.isBlank() || it.description.isBlank() }) add("assertions must have non-blank id and description")
+        if (contract.assertions.any { it.expectedText != null && it.expectedText.isBlank() }) add("assertion expectedText must not be blank")
         contract.assertions.groupBy { it.id }.filterValues { it.size > 1 }.keys.forEach { add("duplicate assertion id: $it") }
         contract.schedule?.intervalMinutes?.let { if (it <= 0) add("schedule.intervalMinutes must be positive") }
         if (contract.modelPolicy.model.isBlank()) add("modelPolicy.model must not be blank")

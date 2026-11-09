@@ -41,14 +41,14 @@ internal object YamlTestTaskParser {
                     val rest = line.removePrefix("- ").trim()
                     if (rest.isNotEmpty()) {
                         val (key, value) = split(rest)
-                        require(key in if (section == "steps") setOf("id", "instruction") else setOf("id", "kind", "description", "required")) {
+                        require(key in if (section == "steps") setOf("id", "instruction") else setOf("id", "kind", "description", "required", "expectedText")) {
                             "Unknown YAML field '$key' in $section"
                         }
                         current[key] = value
                     }
                 } else {
                     val (key, value) = split(line)
-                    require(key in if (section == "steps") setOf("id", "instruction") else setOf("id", "kind", "description", "required")) {
+                    require(key in if (section == "steps") setOf("id", "instruction") else setOf("id", "kind", "description", "required", "expectedText")) {
                         "Unknown YAML field '$key' in $section"
                     }
                     current?.set(key, value)
@@ -79,6 +79,7 @@ internal object YamlTestTaskParser {
                     },
                     description = scalar(it["description"].orEmpty()),
                     required = it["required"]?.let(::scalar)?.toBooleanStrictOrNull() ?: true,
+                    expectedText = it["expectedText"]?.let(::scalar),
                 )
             },
             modelPolicy = TestModelPolicy(scalar(model["model"].orEmpty()), scalar(model["promptVersion"].orEmpty())),

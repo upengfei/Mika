@@ -13,6 +13,9 @@ import com.wangzan101.mika.task.TriggerRuntime
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.intOrNull
 import com.wangzan101.mika.core.record.RunEvent
 import com.wangzan101.mika.core.record.RunSummary
 import java.io.File
@@ -93,6 +96,15 @@ class TestExecutionService private constructor(
 }
 
 data class TestScheduleReceipt(val scheduleId: String, val firstAtMs: Long, val intervalMs: Long)
+
+/** A verification failure outranks a model's success; passing assertions cannot hide a failed task. */
+fun testRunResult(summary: RunSummary): String = when {
+    summary.verdict in setOf("fail", "cannot_verify") -> requireNotNull(summary.verdict)
+    summary.outcome != null && summary.outcome != "succeeded" -> requireNotNull(summary.outcome)
+    summary.judged != null && summary.judged != "done" -> requireNotNull(summary.judged)
+    summary.verdict == "pass" -> "pass"
+    else -> summary.judged ?: summary.outcome ?: "unknown"
+}
 
 /** Read-only access to Mika's persisted run evidence for the test workspace. */
 class TestRunRepository(private val store: RunStore, private val archiveRoot: File? = null) {
@@ -198,7 +210,7 @@ class TestRunRepository(private val store: RunStore, private val archiveRoot: Fi
         try {
             nextPage()
             line("Test run ${summary.id}", heading)
-            line("Result: ${summary.judged ?: summary.outcome ?: "unknown"} · Model: ${summary.model} · Steps: ${summary.steps}")
+            line("Result: ${testRunResult(summary)} · Model: ${summary.model} · Steps: ${summary.steps}")
             line("Command: ${summary.goal}")
             line("Assertions: ${summary.criteria.joinToString("; ")}")
             timeline.forEach { event ->
@@ -216,6 +228,10 @@ class TestRunRepository(private val store: RunStore, private val archiveRoot: Fi
                     }
                     is RunEvent.TaskEnded -> line("${event.atMs} · ${event.outcome}: ${event.answerOrReason.orEmpty()}")
                     is RunEvent.Replay -> line("${event.atMs} · Replay ${event.step}/${event.total}: ${event.detail}")
+                    is RunEvent.Verifier -> {
+                        line("断言核查：${event.verdict} · ${event.detailJson}")
+                        if (event.verdict != "pass") verificationScreenshot(event)?.let(::screenshot)
+                    }
                     else -> Unit
                 }
             }
@@ -251,12 +267,15 @@ class TestRunRepository(private val store: RunStore, private val archiveRoot: Fi
                 is RunEvent.ToolResult -> "${event.tool}: ${event.resultJson}"
                 is RunEvent.TaskEnded -> "${event.outcome}: ${event.answerOrReason.orEmpty()}"
                 is RunEvent.Criteria -> "Assertions: ${event.criteria.joinToString("; ")}"
+                is RunEvent.Verifier -> "断言核查：${event.verdict} · ${event.detailJson}"
                 else -> event::class.simpleName.orEmpty()
             }
-            val failure = event is RunEvent.Activity && event.failed || event is RunEvent.ToolResult && event.changed == false
+            val failure = event is RunEvent.Activity && event.failed || event is RunEvent.ToolResult && event.changed == false ||
+                event is RunEvent.Verifier && event.verdict != "pass"
             val screenshotId = when (event) {
                 is RunEvent.ToolResult -> event.screenshotId
                 is RunEvent.Activity -> events.filterIsInstance<RunEvent.ToolResult>().firstOrNull { it.step == event.step && it.screenshotId != null }?.screenshotId
+                is RunEvent.Verifier -> verificationScreenshot(event)
                 else -> null
             }
             val evidence = if (!failure) "" else {
@@ -269,7 +288,7 @@ class TestRunRepository(private val store: RunStore, private val archiveRoot: Fi
             }
             "<tr class=\"${if (failure) "failure" else ""}\"><td>${event.atMs}</td><td>${event::class.simpleName.orEmpty()}</td><td>${TestExportRedactor.text(detail).html()}</td><td>$evidence</td></tr>"
         }
-        val verdict = summary.judged ?: summary.outcome ?: "unknown"
+        val verdict = testRunResult(summary)
         return """<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Test run ${summary.id}</title>
 <style>body{font:14px system-ui,sans-serif;margin:24px;color:#202124}table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:8px;border-bottom:1px solid #ddd;vertical-align:top}.failure{background:#fff0ee}img{max-width:480px}</style>
 <h1>Test run ${summary.id.html()}</h1><p>Result: ${TestExportRedactor.text(verdict).html()} · Model: ${TestExportRedactor.text(summary.model).html()} · Steps: ${summary.steps}</p>
@@ -278,6 +297,10 @@ class TestRunRepository(private val store: RunStore, private val archiveRoot: Fi
     }
 
     private fun String.html(): String = replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#39;")
+
+    private fun verificationScreenshot(event: RunEvent.Verifier): Int? = runCatching {
+        ((Json.parseToJsonElement(event.detailJson) as? JsonObject)?.get("screenshotId") as? JsonPrimitive)?.intOrNull?.takeIf { it > 0 }
+    }.getOrNull()
 
     private companion object {
         val RUN_ID = Regex("\\d{8}-\\d{6}-[a-z0-9]{6}")

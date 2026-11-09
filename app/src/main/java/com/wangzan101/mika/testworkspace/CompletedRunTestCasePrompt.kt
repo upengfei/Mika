@@ -1,6 +1,7 @@
 package com.wangzan101.mika.testworkspace
 
 import android.widget.Toast
+import android.util.Log
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -27,6 +28,8 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 
+private data class CapturedRun(val runId: String, val goal: String, val activities: List<RunEvent.Activity>)
+
 /** MP-only prompt for turning a successful exploratory run into a reusable test case. */
 @Composable
 fun CompletedRunTestCasePrompt(vm: ChatViewModel) {
@@ -35,7 +38,7 @@ fun CompletedRunTestCasePrompt(vm: ChatViewModel) {
     val ui by vm.ui.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var pending by remember { mutableStateOf<Pair<String, List<RunEvent.Activity>>?>(null) }
+    var pending by remember { mutableStateOf<CapturedRun?>(null) }
     var saving by remember { mutableStateOf(false) }
     val promptedRuns = remember(vm) {
         mutableStateOf(ui.exchanges.filter { it.status is ExchangeStatus.Done }.mapNotNull { it.runId }.toSet())
@@ -49,11 +52,11 @@ fun CompletedRunTestCasePrompt(vm: ChatViewModel) {
         }
         if (fresh != null) {
             promptedRuns.value = promptedRuns.value + requireNotNull(fresh.runId)
-            pending = fresh.goal to fresh.activities
+            pending = CapturedRun(requireNotNull(fresh.runId), fresh.goal, fresh.activities)
         }
     }
 
-    pending?.let { (goal, activities) ->
+    pending?.let { (runId, goal, activities) ->
         MikaDialog(
             onDismissRequest = { if (!saving) pending = null },
             title = { Text(stringResource(R.string.test_case_capture_title)) },
@@ -72,7 +75,11 @@ fun CompletedRunTestCasePrompt(vm: ChatViewModel) {
                                 val contract = TestCaseDraft.fromRun(goal, activities, "captured-${UUID.randomUUID()}")
                                     ?: return@withContext false
                                 TestTaskContracts.requireValid(contract)
-                                TestCaseRepository(File(context.filesDir, "test-case-repository")).createCase(contract)
+                                val saved = TestCaseRepository(File(context.filesDir, "test-case-repository")).createCase(contract)
+                                // Saving the contract succeeds even when route evidence is not ready or replay is unsafe.
+                                runCatching {
+                                    TestReplayRuntime.learning(context).capture(saved.id, saved.currentVersion, runId)
+                                }.onFailure { Log.w("TestCaseCapture", "case saved; replay binding pending", it) }
                                 true
                             }
                         } catch (cancelled: CancellationException) {
