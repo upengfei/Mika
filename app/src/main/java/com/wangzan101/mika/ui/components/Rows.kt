@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.wangzan101.mika.ui.theme.MikaColors
@@ -135,10 +136,10 @@ enum class ValueTone { Plain, Ok, Warn, Bad, Link }
 
 /** 行尾的值。 */
 @Composable
-fun RowValue(text: String, tone: ValueTone = ValueTone.Plain) {
+fun RowValue(text: String, tone: ValueTone = ValueTone.Plain, modifier: Modifier = Modifier) {
     val c = MikaTheme.colors
     Text(
-        text, style = MikaType.Value,
+        text, modifier = modifier, style = MikaType.Value,
         fontWeight = if (tone == ValueTone.Link) FontWeight.Medium else FontWeight.Normal,
         color = when (tone) {
             ValueTone.Plain -> c.ink3
@@ -148,6 +149,7 @@ fun RowValue(text: String, tone: ValueTone = ValueTone.Plain) {
             ValueTone.Link -> c.accent
         },
         maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
     )
 }
 

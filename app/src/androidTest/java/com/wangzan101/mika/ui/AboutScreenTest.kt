@@ -4,6 +4,7 @@ import com.wangzan101.mika.ChineseUi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -192,6 +193,16 @@ class AboutScreenTest {
         compose.waitForIdle()
         assertEquals(0, calls.checks)
         assertTrue(calls.urls.isEmpty())
+    }
+
+    /** 长版本状态不能把「检查更新」标题压成逐字换行。 */
+    @Test
+    fun longUpdateStatusKeepsCheckTitleReadable() {
+        val longVersion = r020.copy(version = "0.1.39-mp.49")
+        about(UpdateState(latest = longVersion, update = longVersion, status = CheckStatus.Done))
+
+        compose.onNodeWithText("检查更新", useUnmergedTree = true)
+            .assertWidthIsAtLeast(56.dp)
     }
 
     @Test

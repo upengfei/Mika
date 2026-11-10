@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -115,8 +116,13 @@ fun AboutScreen(
                     }
                 },
             ) {
-                TrailingValue(v)
-                RowChevron()
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    TrailingValue(v)
+                    RowChevron()
+                }
             }
             ListRow(
                 MikaIcons.Refresh,
@@ -222,8 +228,14 @@ internal fun TrailingValue(v: AboutCopy.CheckValue) {
         CircularProgressIndicator(Modifier.size(16.dp).testTag("update-spinner"), color = MikaTheme.colors.accent, strokeWidth = 2.dp)
         return
     }
-    if (v.dot) UpdateDot()
-    v.text?.let { RowValue(it, if (v.highlight) ValueTone.Link else ValueTone.Plain) }
+    Row(
+        Modifier.widthIn(max = 144.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (v.dot) UpdateDot()
+        v.text?.let { RowValue(it, if (v.highlight) ValueTone.Link else ValueTone.Plain, Modifier.weight(1f)) }
+    }
 }
 
 /** 有新版本时的小红点。 */
