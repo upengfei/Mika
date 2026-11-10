@@ -34,3 +34,9 @@ The regression check in `tools/ci/check-upstream-merge.sh` uses Git's real three
 - `apksigner verify app/build/outputs/apk/workspace/app-workspace.apk`
 - `git diff --cached --check`
 - No unresolved paths or conflict markers remain.
+
+## 2026-11-10 upstream update
+
+The fork's main and Mika upstream/main advanced to 996f8862. The same merge check predicted four new content conflicts in the updater, chat screen, navigation, and Traditional Chinese resources. They were reconciled while preserving the MP workspace and the upstream file library, terminal, and recommended-task features.
+
+The upstream release reorganized resources and added Persian translations. The new Persian resource set now includes the required fallback keys for MP and update-status strings; Chinese-only MP copy remains excluded from non-Chinese translations. Full tests and workspace packaging pass after cleaning generated duplicate DEX output.
