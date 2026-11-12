@@ -75,7 +75,7 @@ class VoiceHoldTest {
             var t by remember { mutableStateOf(text) }
             Box(Modifier.fillMaxSize()) {
                 Composer(
-                    Modifier, t, { t = it }, ComposerMode.Idle, hasHistory = false, onSend = {}, onStop = {},
+                    modifier = Modifier, text = t, onText = { t = it }, mode = ComposerMode.Idle, hasHistory = false, onSend = {}, onStop = {},
                     voice = voice,
                     onVoiceText = { t = com.wangzan101.mika.voice.HoldToTalk.join(t, it) },
                     onVoiceSend = if (sendVoice) ({ voiceSent += com.wangzan101.mika.voice.HoldToTalk.join(t, it); t = "" }) else null,

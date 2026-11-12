@@ -47,6 +47,7 @@ import com.wangzan101.mika.core.agent.FailKind
 import com.wangzan101.mika.core.agent.ModelRouter
 import com.wangzan101.mika.core.memory.MemoryExtractor
 import com.wangzan101.mika.core.memory.MemoryStore
+import com.wangzan101.mika.core.memory.TaskMemoryRecorder
 import com.wangzan101.mika.core.memory.UserUtterances
 import com.wangzan101.mika.core.model.ChatModel
 import com.wangzan101.mika.core.model.ModelSession
@@ -97,6 +98,7 @@ import com.wangzan101.mika.core.tool.ToolDispatcher
 import com.wangzan101.mika.core.vision.VisionService
 import com.wangzan101.mika.cap.phone.display.AgentDisplay
 import com.wangzan101.mika.cap.phone.display.LazyAgentDisplay
+import com.wangzan101.mika.cap.phone.display.PipInput
 import com.wangzan101.mika.record.RunHandle
 import com.wangzan101.mika.record.RunStore
 import com.wangzan101.mika.settings.FeatureFlags
@@ -235,6 +237,7 @@ class TaskRun(
     private val _tagged = Mirrored<Pair<String, TaskState>?>(conversationId to _state.value, service.taskState._shownTask)
     private val _takeoverStage = Mirrored(Takeover.Stage.None, service.taskState._takeoverStage)
     private val _frames = Mirrored<Bitmap?>(null, service.taskState._frames)
+    private val _phoneFrames = MutableStateFlow<Bitmap?>(null)
     private val _activities = Mirrored<List<RunEvent.Activity>>(emptyList(), service.taskState._activities)
     /** 活动只追加;发布的是前 n 条的只读视图,每来一条不复制已有的。 */
     private val activityLog = ArrayList<RunEvent.Activity>()
@@ -244,6 +247,8 @@ class TaskRun(
     }
     private val _steers = Mirrored<List<SteerNote>>(emptyList(), service.taskState._steers)
     private val _displayId = Mirrored(-1, env.agentDisplayId)
+    /** 小窗直接操作的口子:屏建好才有,释放时清空。 */
+    private val _pipInput = Mirrored<PipInput?>(null, service.taskState._pipInput)
     /** 虚拟屏上打开过 App:画中画据此才出来(只建了空屏、没打开过 App 时没有画面)。 */
     private val _appShown = Mirrored(false, env.agentAppShown)
     /** 正在用内置浏览器:画中画改显示网页画面。 */
@@ -255,16 +260,20 @@ class TaskRun(
     val sharedFiles: StateFlow<List<SharedFile>> = _sharedFiles.flow
     val takeoverStage: StateFlow<Takeover.Stage> = _takeoverStage.flow
     val frames: StateFlow<Bitmap?> = _frames.flow
+    /** 个人助手的缩略图只收本任务获准展示的手机画面。 */
+    val phoneFrames: StateFlow<Bitmap?> = _phoneFrames.asStateFlow()
     /** 本任务到此刻的活动(实际做过的事);悬浮胶囊的卡片按任务取,不只看显示中的那个。 */
     val activities: StateFlow<List<RunEvent.Activity>> = _activities.flow
     /** 本任务的虚拟屏编号;屏到用到系统命令、事件工具或第一次打开 App 时才建,之前和释放之后为 -1。 */
     val displayId: StateFlow<Int> = _displayId.flow
+    /** 本任务小窗的直接操作口;屏建好才有,释放后回到 null。 */
+    val pipInput: StateFlow<PipInput?> = _pipInput.flow
     /** 此刻在用内置浏览器(工具的界面是网页);没用、任务结束后为 false。 */
     val webOpen: StateFlow<Boolean> = _webOpen.flow
     /** 本任务进行中插的话和它们的去向;悬浮胶囊的对话卡片按任务取。 */
     val steers: StateFlow<List<SteerNote>> = _steers.flow
     // 带对话编号的那份先写:收不带编号的状态时读到的编号就已经是这个任务的(界面据此不把别的对话的状态接到屏上)
-    private val mirrored = listOf(_runId, _sharedFiles, _tagged, _state, _takeoverStage, _frames, _displayId, _appShown, _webOpen, _activities, _steers)
+    private val mirrored = listOf(_runId, _sharedFiles, _tagged, _state, _takeoverStage, _frames, _displayId, _pipInput, _appShown, _webOpen, _activities, _steers)
 
     private fun setState(s: TaskState) = synchronized(service.taskState.shownLock) {
         _tagged.value = conversationId to s
@@ -622,8 +631,26 @@ class TaskRun(
                         create()
                     }.also { d ->
                         _displayId.value = d.displayId
-                        side.launch { d.frames.collect { if (dispatcher?.surface != WEB) _frames.value = if (previewAllowed()) it else null } }
-                        side.launch { appAccess.state.collect { if (dispatcher?.surface != WEB && !previewAllowed()) _frames.value = null } }
+                        _pipInput.value = PipInputImpl(shell, d)
+                        side.launch {
+                            combine(d.frames, _appShown.flow) { frame, shown -> frame to shown }.collect { (frame, shown) ->
+                                if (dispatcher?.surface != WEB) {
+                                    val allowed = frame.takeIf { previewAllowed() }
+                                    if (dispatcher?.surface != WEB) {
+                                        _frames.value = allowed
+                                        _phoneFrames.value = allowed.takeIf { shown }
+                                    }
+                                }
+                            }
+                        }
+                        side.launch {
+                            appAccess.state.collect {
+                                if (dispatcher?.surface != WEB && !previewAllowed()) {
+                                    _frames.value = null
+                                    _phoneFrames.value = null
+                                }
+                            }
+                        }
                     }
                 }
                 val audio = recovery.audioMute(shell, key).also { mute = it }
@@ -732,6 +759,7 @@ class TaskRun(
                 sw.copy(learnSkills = env.evalHooks.learnSkills ?: sw.learnSkills, autoRemember = env.evalHooks.rememberMemory ?: sw.autoRemember)
             }
             val memory = if (switches.useMemory) withContext(Dispatchers.IO) { memoryRuntime.store() } else null
+            val taskMemory = if (switches.rememberTasks) withContext(Dispatchers.IO) { memoryRuntime.taskMemory() } else null
             val profileSnapshot = if (switches.useMemory) withContext(Dispatchers.IO) {
                 runCatching { memoryRuntime.profile().snapshot() }.onFailure { Log.w(TAG, "profile unavailable", it) }.getOrDefault(emptyList())
             } else emptyList()
@@ -757,6 +785,7 @@ class TaskRun(
                     while (true) {
                         delay(WEB_FRAME_MS)
                         val surface = dispatcher?.surface
+                        if (surface == WEB) _phoneFrames.value = null
                         if (surface != last) {
                             _frames.value = null
                             last = surface
@@ -831,7 +860,15 @@ class TaskRun(
                 store = (service.application as MikaApp).childRuns,
                 ownerAlive = { job?.isActive == true },
             ).also { children = it } else null
+            // 自身端口:只给手机上、有用户的 UI 主任务;子任务、条件检查、定时、渠道、MCP 都没有。
+            // 状态只读工具一直给;操作类工具等用户打开「允许 Mika 操作自己的界面」。
+            val selfPort = if (provenance.origin == RunOrigin.Ui && !conditionCheck) {
+                (service.application as? MikaApp)?.let { app -> com.wangzan101.mika.self.AndroidSelfPort(app, conversationId, key) }
+            } else null
             val tools = toolDispatcher(accessedPhone, model.capabilities.vision, catalog, recordFrames = true, vision = vision?.let { VisionService(it, BitmapImageOps) },
+                phoneCalls = (service.application as MikaApp).callPort.takeIf {
+                    !conditionCheck && (service.application as MikaApp).calls.settings.state.value.enabled
+                },
                 // 设置里允许 Mika 改自己时,才把 settings_list、settings_set 发给模型
                 selfConfig = if (FeatureFlags.get(service).selfConfig()) {
                     com.wangzan101.mika.settings.SelfConfigImpl(FeatureFlags.get(service))
@@ -839,6 +876,7 @@ class TaskRun(
                 stableRefs = speed.inlineScreen, inlineScreen = speed.inlineScreen,
                 adaptiveVision = speed.adaptiveVision,
                 deepLinks = speed.deepLinks, memory = memory, profile = if (memory != null) memoryRuntime.profile() else null,
+                taskMemory = taskMemory,
                 utterances = utterances, conversationId = conversationId,
                 web = web,
                 // 同一个网站一页一页看:换页前补足停留,不连着秒开
@@ -870,7 +908,10 @@ class TaskRun(
                 webSearch = com.wangzan101.mika.settings.WebSearchSettings.get(service).service(),
                 // 已 root 的手机上用户打开了「允许 Mika 执行 root 命令」才登记 root 工具(子任务、条件检查不给)
                 root = phoneServices.shellManager.root.takeIf { !conditionCheck && it.commandsAllowed() }
-                    ?.let { r -> RootCommands(RootShell::su, r::commandsAllowed) { a -> if (a == null) r.suGone() else r.commandsDenied(a) } })
+                    ?.let { r -> RootCommands(RootShell::su, r::commandsAllowed) { a -> if (a == null) r.suGone() else r.commandsDenied(a) } },
+                // 看/操作 Mika 自己;开关关着时只给只读状态
+                self = selfPort,
+                selfOperate = selfPort?.takeIf { FeatureFlags.get(service).selfOperate() })
             dispatcher = tools
             val optimization = if (BuildConfig.BUILD_TYPE == "workspace") TestReplayRuntime.fastPolicy(service, goal, tools, sink, model, vision)
                 .also { fastReplay = it } else RunExtensions.None
@@ -1034,6 +1075,7 @@ class TaskRun(
             handoffUnconsumed()
             side.cancel()
             _frames.value = null
+            _phoneFrames.value = null
             _webOpen.value = false
             synchronized(publishLock) { ended = true }
             if (awake != null && service.hasQueuedRuns()) wakeHandoff = service.wakeLock.lease().also { it.acquire() }
@@ -1077,6 +1119,7 @@ class TaskRun(
             phone = null
             // 屏释放后、对外报结束前清掉:界面看到任务结束时已经没有屏了
             _displayId.value = -1
+            _pipInput.value = null
             _appShown.value = false
             if (connection != null) phoneServices.sharedShell.release()
         }
@@ -1087,6 +1130,45 @@ class TaskRun(
         val shell: com.wangzan101.mika.shell.IMikaShell, val a11y: ScreenAccessibility, val screen: AndroidScreen,
         val display: LazyAgentDisplay, val audio: AppMuter,
     )
+
+    /**
+     * 小窗直接操作的口子:把预览画面上的归一化坐标换算成虚拟屏逻辑坐标,交给内置助手注入。
+     * 注入走后台线程:injectStroke 会按笔迹时长逐点 sleep,不能占着界面线程。
+     */
+    private class PipInputImpl(
+        private val shell: com.wangzan101.mika.shell.IMikaShell,
+        private val display: AgentDisplay,
+    ) : PipInput {
+        override suspend fun tap(fx: Float, fy: Float) {
+            withContext(Dispatchers.IO) {
+                runCatching { shell.injectTap(display.displayId, (fx * display.width).toInt(), (fy * display.height).toInt()) }
+            }
+        }
+
+        override suspend fun swipe(points: List<Pair<Float, Float>>, durationMs: Long) {
+            if (points.size < 2) {
+                if (points.size == 1) tap(points[0].first, points[0].second)
+                return
+            }
+            withContext(Dispatchers.IO) {
+                val n = points.size
+                runCatching {
+                    shell.injectStroke(
+                        display.displayId,
+                        IntArray(n) { (points[it].first * display.width).toInt() },
+                        IntArray(n) { (points[it].second * display.height).toInt() },
+                        LongArray(n) { durationMs * it / (n - 1) },
+                    )
+                }
+            }
+        }
+
+        override suspend fun back() {
+            withContext(Dispatchers.IO) {
+                runCatching { shell.injectKey(display.displayId, android.view.KeyEvent.KEYCODE_BACK) }
+            }
+        }
+    }
 
     /**
      * 这次任务的静音规则(见 [AppMuter]):Mika 自己不静;没有桌面入口的系统包不静(系统界面、选择框一类);
@@ -1262,6 +1344,7 @@ class TaskRun(
      * 在进程级的作用域里跑,服务退出也不中断。
      */
     suspend fun learnAfter(end: TaskState, outcome: RunOutcome?, conversations: ConversationStore) = measuredAfter("learning") {
+        rememberTask()
         learnAfterBody(end, outcome, conversations)
     }
 
@@ -1308,6 +1391,24 @@ class TaskRun(
                 } }
             }
         }, block = block)
+    }
+
+    /**
+     * 任务结束之后:按这次运行的事件记一条跨会话摘要(不拖慢交付,失败不影响任务结局)。
+     * 开关关着、没有运行编号、没读到事件、没什么可记的都不记。
+     */
+    private suspend fun rememberTask() {
+        val runId = _runId.value ?: return
+        if (!memoryRuntime.settings().switches.value.rememberTasks) return
+        val events = withContext(Dispatchers.IO) { runCatching { kit?.runStore?.events(runId) }.getOrNull() } ?: return
+        val labels = ToolLabels(knownTools())
+        val task = TaskMemoryRecorder.record(goal, events, System.currentTimeMillis(), UUID.randomUUID().toString(), labels::label) {
+            ConfirmationNotifier.appLabel(service, it)
+        } ?: return
+        withContext(Dispatchers.IO) {
+            runCatching { memoryRuntime.taskMemory().add(task) }
+                .onFailure { Log.w(TAG, "task memory not saved", it) }
+        }
     }
 
     /** 办成的运行记成路线;记不成(不该记、写盘失败)不影响任务结局。 */

@@ -29,8 +29,8 @@ android {
         applicationId = "com.wangzan101.mika"
         minSdk = 30
         targetSdk = 35
-        versionCode = 40
-        versionName = "0.1.39"
+        versionCode = 41
+        versionName = "0.1.40"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "GIT_HASH", "\"$gitHash\"")
         buildConfigField("String", "UPDATE_RELEASE_REPOSITORY", "\"https://github.com/wangzan101/Mika\"")
@@ -38,6 +38,7 @@ android {
         buildConfigField("String", "UPDATE_RELEASE_TAG_PREFIX", "\"\"")
         // 关于页版本号后的 Beta 标记;出正式版时改成 false
         buildConfigField("boolean", "BETA", "true")
+        buildConfigField("boolean", "ADB_LOGS", "false")
     }
 
     signingConfigs {
@@ -102,6 +103,18 @@ android {
             buildConfigField("String", "UPDATE_RELEASE_REPOSITORY", "\"$mpReleaseRepository\"")
             buildConfigField("String", "UPDATE_RELEASE_API", "\"$mpReleaseApi\"")
             buildConfigField("String", "UPDATE_RELEASE_TAG_PREFIX", "\"mp-v\"")
+        }
+
+        // 本地日志检查包：并排安装，允许 adb run-as，首次启动即记录详细 Trace。
+        create("logs") {
+            initWith(getByName("perf"))
+            applicationIdSuffix = ".logs"
+            versionNameSuffix = "-logs"
+            isDebuggable = true
+            isProfileable = false
+            resValue("string", "app_name", "Mika Logs")
+            buildConfigField("boolean", "ADB_LOGS", "true")
+            matchingFallbacks += "release"
         }
     }
 
