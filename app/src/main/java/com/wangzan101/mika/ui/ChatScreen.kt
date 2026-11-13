@@ -188,6 +188,8 @@ fun ChatScreen(
     webOpen: StateFlow<Boolean>,
     /** 小窗直接操作的入口(点/滑/返回注入到虚拟屏);屏没建好或任务结束时为 null。 */
     pipInput: StateFlow<com.wangzan101.mika.cap.phone.display.PipInput?> = MutableStateFlow(null),
+    /** 小窗目标 App 的声音被用户恢复过:声音按钮显示「静音」,否则「恢复声音」。 */
+    pipSoundOn: StateFlow<Boolean> = MutableStateFlow(false),
     /** 用户在设置里开了「允许我在小窗里直接操作」。 */
     pipOperateEnabled: Boolean = false,
     reduceMotion: Boolean,
@@ -543,6 +545,7 @@ fun ChatScreen(
             frame = frame,
             webContent = webContent,
             pipInput = pipInputLive,
+            soundOn = pipSoundOn.collectAsState().value,
             operateEnabled = pipOperateEnabled,
             reduceMotion = reduceMotion,
             topInset = topHeight.toFloat(),
@@ -555,7 +558,7 @@ fun ChatScreen(
                 Toast.makeText(context, context.getString(R.string.pip_closed_hint), Toast.LENGTH_SHORT).show()
             },
             onReopen = vm::reopenPip,
-            onUnmute = vm::unmutePip,
+            onToggleSound = vm::togglePipSound,
             // 要你处理时点小窗:收起,滚到要你处理的那张卡片(在最后一问一答里,它后面只可能还有文件卡片和去设置那一行)
             onAttention = {
                 vm.attendPip()
@@ -1609,7 +1612,7 @@ internal fun Composer(
                     val label = if (panel == Panel.Open) AttachCopy.CLOSE else AttachCopy.ADD
                     val blockedHint = stringResource(R.string.attach_blocked_running)
                     Box(
-                        Modifier.size(MikaSize.IconButton).clip(CircleShape)
+                        Modifier.size(MikaSize.IconButton).background(c.greySoft, CircleShape).clip(CircleShape)
                             .clickable(enabled = !importing, onClickLabel = label, onClick = {
                                 if (attachBlocked) {
                                     Toast.makeText(context, blockedHint, Toast.LENGTH_SHORT).show()
@@ -1617,7 +1620,7 @@ internal fun Composer(
                             }),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(MikaIcons.Plus, label, Modifier.size(MikaSize.Icon).graphicsLayer { rotationZ = turn }, tint = c.ink)
+                        Icon(MikaIcons.Plus, label, Modifier.size(20.dp).graphicsLayer { rotationZ = turn }, tint = c.ink)
                     }
                 }
                 Box(Modifier.weight(1f).padding(start = if (showAttach) 2.dp else 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp)) {
