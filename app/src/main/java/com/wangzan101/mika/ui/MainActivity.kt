@@ -398,6 +398,8 @@ private fun MikaRoot(
         }
     }
     var runId by rememberSaveable { mutableStateOf<String?>(null) }
+    var reportRunId by rememberSaveable { mutableStateOf<String?>(null) }
+    var playbackScreenshotId by rememberSaveable { mutableStateOf<Int?>(null) }
     var sourceRunId by rememberSaveable { mutableStateOf<String?>(null) }
     var sourceLegacyText by rememberSaveable { mutableStateOf<String?>(null) }
     val status by monitor.status.collectAsState()
@@ -536,18 +538,13 @@ private fun MikaRoot(
                 conversationChanges = ConversationStore.shared(context).changes,
                 conversationTitle = { ConversationStore.shared(context).title(it) },
                 search = ConversationStore.shared(context).search,
-                onPlans = { nav.pushFromDrawer(Route.Plans) },
-                onTestWorkspace = { nav.pushFromDrawer(Route.TestWorkspace) },
-                onMemory = { nav.pushFromDrawer(Route.Memory) },
+                onTestWorkspace = if (BuildConfig.BUILD_TYPE == "workspace") ({ nav.pushFromDrawer(Route.TestWorkspace) }) else null,
                 onSettings = { nav.pushFromDrawer(Route.Settings) },
-                onBrowser = { nav.pushFromDrawer(Route.Browser) },
-                onFiles = { filesFromDrawer = true; filesConversation = app.chat.ui.value.conversationId; nav.pushFromDrawer(Route.Files) },
                 onScreens = { nav.pushFromDrawer(Route.Screens) },
                 onAbout = { nav.pushFromDrawer(Route.About) },
                 updateAvailable = AboutCopy.drawerDot(updateState),
                 reopen = nav.reopenDrawer,
                 onReopened = nav::drawerReopened,
-                onPersonal = { nav.show(Route.Personal) },
                 onRegularChat = nav::reset,
                 resetKey = nav.resetSerial,
             ) { openDrawer ->
@@ -573,10 +570,11 @@ private fun MikaRoot(
                             pipOperateEnabled = FeatureFlags.get(context).pipOperate(),
                             reduceMotion = MikaTheme.reduceMotion,
                             onOpenDrawer = openDrawer,
-                            onOpenFiles = { filesFromDrawer = false; filesConversation = app.chat.ui.value.conversationId; nav.push(Route.Files) },
                             openSettings = { nav.push(Route.Settings) },
                             openTestWorkspace = { nav.push(Route.TestWorkspace) },
                             openRun = { runId = it; nav.push(Route.Run) },
+                            openReport = { reportRunId = it; nav.push(Route.Report) },
+                            openPlayback = { reportRunId = it; playbackScreenshotId = null; nav.push(Route.Playback) },
                             phoneSetupNeeded = phoneSetupNeeded && status.builtinShell != BuiltinShellStatus.Running,
                             openPhoneSetup = { onFix(Fix.OpenPhoneSetup) },
                             loadSource = { id ->
@@ -620,6 +618,10 @@ private fun MikaRoot(
             val autonomous by app.approvals.autonomous.collectAsState()
             SettingsScreen(store, status, release, onFix, onBack = back, onOpenMemory = { nav.push(Route.Memory) },
                 onOpenModels = { nav.push(Route.Models) },
+                onOpenBrowser = { nav.push(Route.Browser) },
+                onOpenFiles = { filesFromDrawer = true; filesConversation = app.chat.ui.value.conversationId; nav.push(Route.Files) },
+                onOpenPersonal = { nav.show(Route.Personal) },
+                onOpenPlans = { nav.push(Route.Plans) },
                 autonomous = autonomous, onAutonomous = app.approvalControl::setAutonomous,
                 updateVersion = updateState.update?.version, onOpenAbout = { nav.push(Route.About) },
                 mcpServers = app.mcpServers)
@@ -713,6 +715,15 @@ private fun MikaRoot(
                     alive = { run -> app.taskState.runs.value.any { r -> r.runId.value == run } },
                 ) } }
             if (vm != null) RunTimelineScreen(vm, back) else LaunchedEffect(Unit) { nav.back() }
+        }
+        Route.Report, Route.Playback -> {
+            val id = reportRunId
+            val vm = remember(id) { id?.let { TaskReportViewModel(RunStore(context), it) } }
+            if (vm == null) LaunchedEffect(Unit) { nav.back() }
+            else if (nav.current == Route.Report) TaskReportScreen(vm, back,
+                onReplay = { playbackScreenshotId = it; nav.push(Route.Playback) },
+                onTimeline = { runId = id; nav.push(Route.Run) })
+            else TaskPlaybackScreen(vm, playbackScreenshotId, back)
         }
         Route.Source -> {
             val vm = remember(sourceRunId, sourceLegacyText) {

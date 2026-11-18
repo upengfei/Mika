@@ -1,5 +1,7 @@
 package com.wangzan101.mika.task
 
+import com.wangzan101.mika.core.general.NOTICES_READ
+import com.wangzan101.mika.core.proactive.ObservedContext
 import com.wangzan101.mika.R
 import com.wangzan101.mika.i18n.tr
 import com.wangzan101.mika.core.agent.LearnGate
@@ -57,6 +59,12 @@ data class RunAftermath(
     val knowledge: KnowledgeStore? = null,
     /** 交出回答后判的结局;只从办成的学([LearnGate])。没判成、没判过为 [RunOutcome.Unknown]。 */
     val outcome: RunOutcome = RunOutcome.Unknown,
+    /**
+     * 这段对话里有通知提醒([com.wangzan101.mika.core.agent.NoticeTurn]),或这次任务开工时带了从通知里得来的那一段
+     * ([com.wangzan101.mika.core.proactive.ObservedContext]):用户在这里说的话多半是在回应别人写的通知
+     * (「好,就按他说的」),和读过网页的任务一样,不自动从里面提取记忆。用户明说要记的(memory_save)不受影响。
+     */
+    val noticeTainted: Boolean = false,
 )
 
 /**
@@ -101,7 +109,11 @@ class RunLearning(
         // 没有运行编号就没处挂提示,用户看不到也撤销不了:不提取
         val learnable = a.origin == RunOrigin.Ui && a.end is TaskState.Succeeded
         val readWeb = events.filterIsInstance<RunEvent.Observed>().any { it.place?.kind in setOf(PlaceKind.Site, PlaceKind.Page) }
-        if (learnable && !reused && !readWeb && a.runId != null && store != null && extractor != null && switches.autoRemember && a.utterances.isNotEmpty()) {
+        // 读过通知的任务和读过网页的一样:用户这次说的话多半是在回应别人写的东西,不自动提取
+        val readNotices = events.filterIsInstance<RunEvent.Activity>().any { it.label == NOTICES_READ }
+            // 开工时就带着从通知里得来的那一段的也一样(运行记录里有那一笔;记录读不到时还有 a.noticeTainted)
+            || events.filterIsInstance<RunEvent.State>().any { it.name == ObservedContext.RUN_STATE }
+        if (learnable && !reused && !readWeb && !readNotices && !a.noticeTainted && a.runId != null && store != null && extractor != null && switches.autoRemember && a.utterances.isNotEmpty()) {
             val now = store.clock()
             changes += guarded(emptyList()) {
                 yieldToForeground()
@@ -132,15 +144,19 @@ class RunLearning(
         return ActionDigest.of(afterReplay, a.tools).isEmpty()
     }
 
-    /** 每份技能单独读改写(和别的任务同时记结果也不丢);一份出错不影响别的。 */
+    /**
+     * 每份技能单独读改写(和别的任务同时记结果也不丢);一份出错不影响别的。
+     * 这次读了不止一份个人技能时分不清照着哪份做的:结果不记到任何一份上,免得只是翻看过的技能跟着被记成没办成、被停用(#569)。
+     */
     private suspend fun recordOutcomes(used: List<RunEvent.SkillUsed>, end: TaskState, outcome: RunOutcome): List<SkillNote> {
         val result = SkillOutcomes.resultOf(end, outcome) ?: return emptyList()
+        if (used.map { it.name }.distinct().size > 1) return emptyList()
         return used.groupBy { it.name }.mapNotNull { (name, uses) ->
             val next = guarded(null) {
                 skills.update(name) { s -> if (s.status == SkillStatus.active || s.status == SkillStatus.trial) SkillOutcomes.record(s, result, followed = true) else null }
             } ?: return@mapNotNull null
             when (next.status) {
-                SkillStatus.suspended -> SkillNote(tr(R.string.skill_suspended), suspended = name)
+                SkillStatus.suspended -> SkillNote(tr(R.string.skill_suspended, name), suspended = name)
                 SkillStatus.active -> if (uses.isNotEmpty() && result == SkillResult.verified) SkillNote(tr(R.string.skill_verified, name)) else null
                 else -> null
             }

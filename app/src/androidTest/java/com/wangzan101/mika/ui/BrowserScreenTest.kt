@@ -83,22 +83,6 @@ class BrowserScreenTest {
     }
 
     @Test
-    fun drawerHasBrowserEntryThatOpensIt() {
-        compose.setContent {
-            MikaTheme {
-                ChatDrawer(
-                    Prerequisites.Check(emptyList()), DrawerSections(emptyList(), emptyList()), canSwitch = true,
-                    onNew = {}, onPlans = {}, onMemory = {},
-                    onBrowser = { calls += "browser" },
-                    onSettings = {}, onOpen = {},
-                )
-            }
-        }
-        compose.onNodeWithText("浏览器").assertIsDisplayed().performClick()
-        assertEquals(listOf("browser"), calls)
-    }
-
-    @Test
     fun startPageShowsSearchSitesAndRecent() {
         start()
         compose.onNodeWithText(BROWSER_SEARCH_HINT).assertIsDisplayed()
@@ -174,7 +158,7 @@ class BrowserScreenTest {
         }
         compose.onNodeWithText(BROWSER_DESKTOP_TAG).assertIsDisplayed()
         compose.onNodeWithTag("browser-progress").assertIsDisplayed()
-        compose.onNodeWithContentDescription("后退").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("返回").assertIsNotEnabled()
         compose.onNodeWithContentDescription("停止").performClick()
         compose.onNodeWithContentDescription("起始页").performClick()
         compose.onNodeWithContentDescription("分享").performClick()

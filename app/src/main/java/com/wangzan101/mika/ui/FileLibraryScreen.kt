@@ -46,6 +46,8 @@ import com.wangzan101.mika.chat.FileLibrary
 import com.wangzan101.mika.chat.FileLibrarySnapshot
 import com.wangzan101.mika.chat.FileSource
 import com.wangzan101.mika.chat.LibraryFile
+import com.wangzan101.mika.task.DeviceImportStore
+import kotlinx.coroutines.flow.catch
 import com.wangzan101.mika.ui.components.*
 import com.wangzan101.mika.ui.theme.MikaIcons
 import com.wangzan101.mika.ui.theme.MikaTheme
@@ -68,8 +70,11 @@ private data class LibraryRow(
     val input: Boolean,
     val handle: LibraryFileHandle,
     /** 最近一次出现的位置,「在对话中查看」跳到这里。 */
-    val source: FileSource,
-)
+    val source: FileSource?,
+    val deviceImport: Boolean = false,
+) {
+    val type = LibraryFileType.of(name)
+}
 
 private data class LibraryLoaded(
     val rows: List<LibraryRow>,
@@ -145,9 +150,11 @@ internal fun FileLibraryScreen(
 ) {
     val context = LocalContext.current
     val store = remember(conversationStore) { conversationStore ?: ConversationStore.shared(context) }
+    val imports = remember(context) { DeviceImportStore.get(context) }
     val scope = rememberCoroutineScope()
     var revision by remember { mutableIntStateOf(0) }
     LaunchedEffect(store) { store.changes.collect { revision++ } }
+    LaunchedEffect(imports) { imports.recordsFlow().catch { revision++ }.collect { revision++ } }
     val drafts by vm.draftConversations.collectAsState()
     val loaded by produceState<LibraryLoaded?>(null, revision, drafts) {
         value = try { withContext(Dispatchers.IO) {
@@ -157,6 +164,11 @@ internal fun FileLibraryScreen(
                 draftTitles = drafts.associate { it.id to ChatCopy.plainTitle(it.title) },
                 fallbackTitle = { id -> store.title(id)?.let(ChatCopy::plainTitle) },
             )
+            var importReadFailed = false
+            val importRecords = try { imports.allRecords() } catch (_: Exception) {
+                importReadFailed = true
+                emptyList()
+            }
             val rows = result.snapshot?.files.orEmpty().mapNotNull { file ->
                 when (file) {
                     is LibraryFile.Input -> file.sources.maxByOrNull { it.source.atMs ?: Long.MIN_VALUE }?.let { latest ->
@@ -177,8 +189,17 @@ internal fun FileLibraryScreen(
                         )
                     }
                 }
-            }.sortedByDescending { it.at ?: Long.MIN_VALUE }
-            LibraryLoaded(rows, result.titles, result.archived, result.partial, failed = result.snapshot == null)
+            } + importRecords.map { record ->
+                LibraryRow(
+                    "device-import:${record.id}", record.workspacePath.substringAfterLast('/'),
+                    ChatViewModel.sizeLabel(record.size), record.importedAt, listOf(record.conversationId), true,
+                    LibraryFileHandle.Workspace(record.conversationId, record.workspacePath), null, deviceImport = true,
+                )
+            }
+            val titles = result.titles.toMutableMap()
+            importRecords.forEach { record -> titles.putIfAbsent(record.conversationId, record.conversationId) }
+            LibraryLoaded(rows.sortedByDescending { it.at ?: Long.MIN_VALUE }, titles, result.archived,
+                result.partial || importReadFailed, failed = result.snapshot == null && importReadFailed)
         } } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
@@ -188,8 +209,10 @@ internal fun FileLibraryScreen(
     var query by rememberSaveable { mutableStateOf("") }
     var conversation by rememberSaveable { mutableStateOf(if (fromDrawer) null else initialConversation ?: "") }
     var source by rememberSaveable { mutableIntStateOf(0) }
+    var type by rememberSaveable { mutableStateOf<LibraryFileType?>(null) }
     var conversationMenu by remember { mutableStateOf(false) }
     var sourceMenu by remember { mutableStateOf(false) }
+    var typeMenu by remember { mutableStateOf(false) }
     var choosing by remember { mutableStateOf<LibraryRow?>(null) }
     var actionsFor by remember { mutableStateOf<LibraryRow?>(null) }
     var actionsAvailable by remember { mutableStateOf<Boolean?>(null) }
@@ -208,7 +231,8 @@ internal fun FileLibraryScreen(
     val rows = allRows.filter {
         it.name.contains(query.trim(), ignoreCase = true) &&
             (conversation == null || conversation in it.conversations) &&
-            (source == 0 || (source == 1) == it.input)
+            (source == 0 || (source == 1) == it.input) &&
+            (type == null || type == it.type)
     }
     val titles = loaded?.titles.orEmpty()
     val archivedIds = loaded?.archived.orEmpty()
@@ -254,7 +278,8 @@ internal fun FileLibraryScreen(
     /** 跳到文件最近一次出现的消息:输入文件回到那条用户消息,产物回到这一轮的文件卡片。 */
     fun openInChat(item: LibraryRow) {
         if (working) return
-        if (!onOpenSource(item.source.conversationId, fileLibraryTarget(item.source, item.input))) {
+        val source = item.source ?: return
+        if (!onOpenSource(source.conversationId, fileLibraryTarget(source, item.input))) {
             error = R.string.file_library_open_failed
         }
     }
@@ -322,6 +347,7 @@ internal fun FileLibraryScreen(
     })
     val conversationLabel = conversation?.let { titles[it] ?: stringResource(R.string.file_library_current) }
         ?: stringResource(R.string.file_library_all)
+    val typeLabel = stringResource(type?.label ?: R.string.file_library_type_all)
     PageBackground {
         Column(Modifier.fillMaxSize().navigationBarsPadding()) {
             if (selecting) {
@@ -335,7 +361,7 @@ internal fun FileLibraryScreen(
                 )
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp)) {
                     Text(
-                        "$conversationLabel · $sourceLabel", Modifier.weight(1f).testTag("file-library-scope"),
+                        "$conversationLabel · $sourceLabel · $typeLabel", Modifier.weight(1f).testTag("file-library-scope"),
                         style = MikaType.Hint, color = MikaTheme.colors.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                     Text(
@@ -352,9 +378,10 @@ internal fun FileLibraryScreen(
                 )
                 Column(Modifier.padding(horizontal = 16.dp)) {
                     SearchField(query, { query = it }, stringResource(R.string.file_library_search), Modifier.testTag("file-library-search"))
-                    Row(
+                    FlowRow(
                         Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 10.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         val pillMaxWidth = ((LocalConfiguration.current.screenWidthDp.dp - 32.dp - 10.dp) / 2).coerceAtLeast(120.dp)
                         LibraryFilterPill(
@@ -394,6 +421,25 @@ internal fun FileLibraryScreen(
                                 FilterMenuItem(stringResource(text), source == index) {
                                     source = index
                                     sourceMenu = false
+                                }
+                            }
+                        }
+                        LibraryFilterPill(
+                            label = typeLabel,
+                            active = type != null,
+                            expanded = typeMenu,
+                            onToggle = { typeMenu = true },
+                            onDismiss = { typeMenu = false },
+                            modifier = Modifier.widthIn(max = pillMaxWidth).testTag("file-library-type-filter"),
+                        ) {
+                            FilterMenuItem(stringResource(R.string.file_library_type_all), type == null) {
+                                type = null
+                                typeMenu = false
+                            }
+                            LibraryFileType.entries.forEach { option ->
+                                FilterMenuItem(stringResource(option.label), type == option) {
+                                    type = option
+                                    typeMenu = false
                                 }
                             }
                         }
@@ -446,7 +492,7 @@ internal fun FileLibraryScreen(
                                     working = working,
                                     conversationLabel = item.conversations.joinToString(" · ") { titles[it] ?: it },
                                     fromArchived = item.conversations.any { it in archivedIds },
-                                    sourceLabel = stringResource(if (item.input) R.string.file_library_input else R.string.file_library_output),
+                                    sourceLabel = stringResource(if (item.deviceImport) R.string.dev_device_files else if (item.input) R.string.file_library_input else R.string.file_library_output),
                                     divider = index > 0,
                                     onOpen = { preview(item) },
                                     onLongPress = { enterSelection(item) },
@@ -483,7 +529,7 @@ internal fun FileLibraryScreen(
     }
     actionsFor?.let { item ->
         // 来源会话打不开(任务进行中且没开并行、又不是当前会话)时不给这一项
-        val canOpenInChat = item.source.conversationId == vm.ui.value.conversationId || vm.canSwitch()
+        val canOpenInChat = item.source?.let { it.conversationId == vm.ui.value.conversationId || vm.canSwitch() } == true
         val openInChatAction = SheetAction(
             stringResource(R.string.file_library_open_in_chat), icon = MikaIcons.Message,
         ) { openInChat(item) }
@@ -903,14 +949,13 @@ private fun FileTypeTile(name: String) {
 
 /** 文件块的图形和扩展名;图片、代码、文档各一种图形。 */
 private fun fileBadge(name: String): Pair<ImageVector, String> {
-    val ext = name.substringAfterLast('.', "").uppercase(Locale.ROOT).take(4)
-    val icon = when (ext) {
-        "JPG", "JPEG", "PNG", "GIF", "WEBP", "BMP", "HEIC", "SVG", "AVIF" -> MikaIcons.Photo
+    val ext = name.substringAfterLast('.', "").uppercase(Locale.ROOT)
+    val icon = if (LibraryFileType.of(name) == LibraryFileType.Image) MikaIcons.Photo else when (ext) {
         "HTML", "HTM", "CSS", "JS", "JSX", "TS", "TSX", "JSON", "KT", "KTS", "JAVA", "PY", "SH",
         "XML", "YAML", "YML", "TOML", "GO", "RS", "RB", "C", "CPP", "H" -> MikaIcons.Code
         else -> MikaIcons.Doc
     }
-    return icon to ext.ifBlank { "FILE" }
+    return icon to ext.take(4).ifBlank { "FILE" }
 }
 
 /** 多选底部操作条:次按钮分享,主按钮把所选加入待发栏;进行中显示进度。 */

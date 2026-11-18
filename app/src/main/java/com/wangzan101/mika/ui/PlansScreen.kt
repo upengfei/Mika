@@ -32,6 +32,8 @@ import com.wangzan101.mika.core.trigger.TriggerSource
 import com.wangzan101.mika.core.trigger.TriggerSnapshot
 import com.wangzan101.mika.core.trigger.TriggerWindow
 import com.wangzan101.mika.core.trigger.TriggerWindowState
+import com.wangzan101.mika.core.trigger.canToggle
+import com.wangzan101.mika.core.trigger.toCopyPlanDraft
 import com.wangzan101.mika.task.ExactAlarmGuide
 import com.wangzan101.mika.task.TriggerRuntime
 import com.wangzan101.mika.ui.components.ActionSheet
@@ -68,6 +70,7 @@ fun PlansScreen(context: Context, onBack: () -> Unit, onOpenConversation: (Strin
     var snapshot by remember { mutableStateOf(TriggerRuntime.snapshot(context)) }
     var creating by remember { mutableStateOf<String?>(null) }
     var editing by remember { mutableStateOf<TriggerDefinition?>(null) }
+    var copying by remember { mutableStateOf<TriggerDefinition?>(null) }
     var deleting by remember { mutableStateOf<TriggerDefinition?>(null) }
     var acting by remember { mutableStateOf<TriggerDefinition?>(null) }
     var viewingHistory by remember { mutableStateOf<String?>(null) }
@@ -118,7 +121,8 @@ fun PlansScreen(context: Context, onBack: () -> Unit, onOpenConversation: (Strin
             GroupCard {
                 shown.forEachIndexed { i, plan ->
                     val last = snapshot.windows.filter { it.triggerId == plan.id }.maxByOrNull { it.dueAtMs }
-                    PlanRow(plan, last, first = i == 0, onClick = { acting = plan }, onToggle = { on -> act { TriggerRuntime.setEnabled(context, plan.id, on) } })
+                    PlanRow(plan, last, first = i == 0, canToggle = plan.canToggle(snapshot.windows),
+                        onClick = { acting = plan }, onToggle = { on -> act { TriggerRuntime.setEnabled(context, plan.id, on) } })
                 }
             }
         }
@@ -135,6 +139,7 @@ fun PlansScreen(context: Context, onBack: () -> Unit, onOpenConversation: (Strin
                 },
                 SheetAction(tr(R.string.plans_run_now)) { act { TriggerRuntime.runNow(context, plan.id) } },
                 SheetAction(tr(R.string.plans_edit_time)) { editing = plan },
+                SheetAction(tr(R.string.plans_copy)) { copying = plan },
                 SheetAction(tr(R.string.confirm_delete), destructive = true) { deleting = plan },
             ),
             onDismiss = { acting = null },
@@ -153,6 +158,22 @@ fun PlansScreen(context: Context, onBack: () -> Unit, onOpenConversation: (Strin
             onSave = { plan ->
                 if (act { TriggerRuntime.schedule(context, plan) }) creating = null
             },
+        )
+    }
+
+    copying?.let { plan ->
+        val draft = remember(plan.id) { plan.toCopyPlanDraft(System.currentTimeMillis()) }
+        PlanEditorDialog(
+            original = null,
+            newThreadId = plan.threadId,
+            onDismiss = { copying = null },
+            onSave = { copy ->
+                if (act { TriggerRuntime.schedule(context, copy) }) {
+                    segment = if (copy.enabled) 0 else 1
+                    copying = null
+                }
+            },
+            initialDraft = draft,
         )
     }
 
@@ -202,7 +223,8 @@ private fun PlanRunHistoryDialog(snapshot: TriggerSnapshot, planId: String, onDi
 }
 
 @Composable
-private fun PlanRow(plan: TriggerDefinition, last: TriggerWindow?, first: Boolean, onClick: () -> Unit, onToggle: (Boolean) -> Unit) {
+private fun PlanRow(plan: TriggerDefinition, last: TriggerWindow?, first: Boolean, canToggle: Boolean,
+    onClick: () -> Unit, onToggle: (Boolean) -> Unit) {
     val status = when {
         plan.enabled -> tr(R.string.drawer_running)
         last?.state == TriggerWindowState.Delivered -> tr(R.string.plans_done)
@@ -228,8 +250,6 @@ private fun PlanRow(plan: TriggerDefinition, last: TriggerWindow?, first: Boolea
     val sourceSubtitle = "${planSourceLabel(plan.source)} · $subtitle"
     val c = MikaTheme.colors
     val delivered = last?.state == TriggerWindowState.Delivered
-    // 一次性的任务做完后不能再打开;循环的和从没跑过的可以
-    val canToggle = plan.enabled || plan.intervalMs != null || plan.calendarTime != null || last == null
     ListRow(
         null, plan.reminderText ?: plan.goal, sourceSubtitle, first = first,
         detail = last?.let { lastResult(plan, it) } ?: tr(R.string.plans_never_run),

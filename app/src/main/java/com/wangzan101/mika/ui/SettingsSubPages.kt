@@ -1,5 +1,7 @@
 package com.wangzan101.mika.ui
 
+import android.app.TimePickerDialog
+import android.text.format.DateFormat
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import com.wangzan101.mika.i18n.tr
@@ -54,6 +56,7 @@ import com.wangzan101.mika.core.shell.BuiltinShellStatus
 import com.wangzan101.mika.settings.ChannelRow
 import com.wangzan101.mika.settings.Prerequisites
 import com.wangzan101.mika.settings.Problem
+import com.wangzan101.mika.settings.ScheduledQuietHours
 import com.wangzan101.mika.settings.SystemStatus
 import com.wangzan101.mika.settings.notificationOverview
 import com.wangzan101.mika.task.ParallelLimit
@@ -72,6 +75,8 @@ import com.wangzan101.mika.ui.theme.MikaTheme
 import com.wangzan101.mika.ui.theme.MikaType
 import com.wangzan101.mika.core.cap.phone.OperatingPace
 import com.wangzan101.mika.core.usage.TokenBudgetLimits
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
 
 // ---------- 手机操作 ----------
@@ -159,12 +164,18 @@ fun PhoneOpsScreen(
 // ---------- 通知 ----------
 
 /**
- * 设置 › 通知:只看状态、去系统里改。顶上是 App 通知总开关,下面三个任务通知频道各一行(什么时候发 + 现在会不会弹出),
- * 点哪一行都由 [onFix] 打开对应的系统设置页(总开关没开时先请求权限或打开应用通知页)。
+ * 设置 › 通知:显示系统通知频道状态，并设置定时任务的免打扰时段。
  */
 @Composable
 fun NotificationsScreen(status: SystemStatus, onFix: (Fix) -> Unit, onBack: () -> Unit) {
     val o = status.notificationOverview()
+    val context = LocalContext.current
+    val flags = remember(context) { FeatureFlags.get(context) }
+    var quietHours by remember(flags) { mutableStateOf(flags.scheduledQuietHours()) }
+    fun updateQuietHours(hours: ScheduledQuietHours) {
+        flags.setScheduledQuietHours(hours)
+        quietHours = hours
+    }
     PageScaffold(StatusCopy.NOTIFICATIONS, onBack) {
         GroupCard {
             ListRow(
@@ -183,6 +194,46 @@ fun NotificationsScreen(status: SystemStatus, onFix: (Fix) -> Unit, onBack: () -
             ChannelRowItem(StatusCopy.PROGRESS_CHANNEL, StatusCopy.NOTIF_PROGRESS_WHEN, o.progress, Fix.OpenProgressChannel, onFix)
         }
         FooterNote(StatusCopy.NOTIF_FOOTER)
+        GroupCard {
+            ListRow(
+                MikaIcons.Mute, stringResource(R.string.settings_scheduled_quiet),
+                stringResource(R.string.settings_scheduled_quiet_detail), first = true,
+                onClick = { updateQuietHours(quietHours.copy(enabled = !quietHours.enabled)) },
+            ) {
+                MikaSwitch(quietHours.enabled, { updateQuietHours(quietHours.copy(enabled = it)) },
+                    Modifier.testTag("scheduled-quiet-switch"))
+            }
+            if (quietHours.enabled) {
+                QuietHoursTimeRow(R.string.settings_scheduled_quiet_start, quietHours.start) {
+                    updateQuietHours(quietHours.copy(start = it))
+                }
+                QuietHoursTimeRow(R.string.settings_scheduled_quiet_end, quietHours.end) {
+                    updateQuietHours(quietHours.copy(end = it))
+                }
+            }
+        }
+        if (quietHours.enabled && quietHours.start == quietHours.end) {
+            FooterNote(stringResource(R.string.settings_scheduled_quiet_equal))
+        }
+    }
+}
+
+@Composable
+private fun QuietHoursTimeRow(label: Int, time: LocalTime, onChange: (LocalTime) -> Unit) {
+    val context = LocalContext.current
+    val title = stringResource(label)
+    val use24HourClock = DateFormat.is24HourFormat(context)
+    val locale = context.resources.configuration.locales[0]
+    val pattern = DateFormat.getBestDateTimePattern(locale, if (use24HourClock) "Hm" else "hm")
+    ListRow(MikaIcons.Clock, title, onClick = {
+        TimePickerDialog(context, { _, hour, minute -> onChange(LocalTime.of(hour, minute)) },
+            time.hour, time.minute, use24HourClock).apply {
+            setTitle(title)
+            show()
+        }
+    }) {
+        RowValue(DateTimeFormatter.ofPattern(pattern, locale).format(time))
+        RowChevron()
     }
 }
 
@@ -220,9 +271,12 @@ fun DuringWorkScreen(
     pipOperate: Boolean = false, onPipOperate: (Boolean) -> Unit = {},
     externalSchedule: Boolean = false, onExternalSchedule: (Boolean) -> Unit = {},
     stepLimit: Int? = null, onStepLimit: (Int?) -> Unit = {},
+    triggerRunMinutes: Int? = null, onTriggerRunMinutes: (Int?) -> Unit = {},
     tokenBudget: Long? = null, onTokenBudget: (Long?) -> Unit = {},
+    showTaskCost: Boolean = false, onShowTaskCost: (Boolean) -> Unit = {},
 ) {
     var editingLimit by remember { mutableStateOf(false) }
+    var editingTriggerLimit by remember { mutableStateOf(false) }
     var customLimit by remember { mutableStateOf("") }
     var editingTokenBudget by remember { mutableStateOf(false) }
     var customTokenBudget by remember { mutableStateOf("") }
@@ -248,6 +302,12 @@ fun DuringWorkScreen(
                 onClick = { customLimit = stepLimit?.takeIf { it !in STEP_LIMIT_PRESETS }?.toString().orEmpty(); editingLimit = true },
             )
             ListRow(
+                MikaIcons.Clock, stringResource(R.string.settings_trigger_run_limit),
+                triggerRunMinutes?.let { trPlural(R.plurals.settings_trigger_run_minutes_n, it) }
+                    ?: stringResource(R.string.settings_step_limit_off),
+                onClick = { editingTriggerLimit = true },
+            )
+            ListRow(
                 MikaIcons.Clock, stringResource(R.string.settings_task_token_budget),
                 tokenBudget?.let(::tokenBudgetNumber) ?: stringResource(R.string.settings_token_budget_unlimited),
                 onClick = {
@@ -255,6 +315,12 @@ fun DuringWorkScreen(
                     editingTokenBudget = true
                 },
             )
+            ListRow(
+                null, stringResource(R.string.settings_show_task_cost), stringResource(R.string.settings_show_task_cost_sub),
+                onClick = { onShowTaskCost(!showTaskCost) },
+            ) {
+                MikaSwitch(showTaskCost, onShowTaskCost, Modifier.testTag("work-show-task-cost"))
+            }
             parallel?.let { ParallelRow(it, onParallelMax) }
         }
         if (editingLimit) StepLimitDialog(
@@ -263,6 +329,11 @@ fun DuringWorkScreen(
             onCustom = { customLimit = it.filter(Char::isDigit).take(3) },
             onPick = { onStepLimit(it); editingLimit = false },
             onDismiss = { editingLimit = false },
+        )
+        if (editingTriggerLimit) TriggerRunLimitDialog(
+            current = triggerRunMinutes,
+            onPick = { onTriggerRunMinutes(it); editingTriggerLimit = false },
+            onDismiss = { editingTriggerLimit = false },
         )
         if (editingTokenBudget) TokenBudgetDialog(
             title = stringResource(R.string.settings_task_token_budget),
@@ -329,6 +400,26 @@ fun DuringWorkScreen(
 
 /** 步数上限的几个现成选项;别的数在输入框里填。 */
 private val STEP_LIMIT_PRESETS = listOf(30, 60, 120, 240)
+
+/** 定时任务最长运行时间:不限制或几档分钟数,选了就生效。 */
+@Composable
+private fun TriggerRunLimitDialog(current: Int?, onPick: (Int?) -> Unit, onDismiss: () -> Unit) {
+    MikaDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_trigger_run_limit)) },
+        text = {
+            Column {
+                Text(stringResource(R.string.settings_trigger_run_limit_sub), Modifier.padding(bottom = 8.dp))
+                RadioRow(stringResource(R.string.settings_step_limit_off), selected = current == null, onClick = { onPick(null) }, first = true)
+                FeatureFlags.TRIGGER_RUN_MINUTES.forEach { m ->
+                    RadioRow(trPlural(R.plurals.settings_trigger_run_minutes_n, m), selected = current == m, onClick = { onPick(m) })
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
+}
 
 @Composable
 private fun StepLimitDialog(

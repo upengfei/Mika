@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    // 插件 manifest/注册表用 kotlinx.serialization(依赖已经在 libs 里,core 也在用)
     alias(libs.plugins.kotlin.serialization)
 }
 
@@ -27,10 +28,10 @@ android {
 
     defaultConfig {
         applicationId = "com.wangzan101.mika"
-        minSdk = 30
+        minSdk = 29
         targetSdk = 35
-        versionCode = 42
-        versionName = "0.1.41"
+        versionCode = 46
+        versionName = "0.1.45"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "GIT_HASH", "\"$gitHash\"")
         buildConfigField("String", "UPDATE_RELEASE_REPOSITORY", "\"https://github.com/wangzan101/Mika\"")
@@ -92,6 +93,11 @@ android {
             signingConfig = signingConfigs.getByName("debug")
             isProfileable = true
             matchingFallbacks += "release"
+            // 真机比较滑动手感也用优化包,仍覆盖 .dev 测试版并保留它的数据。
+            if (providers.gradleProperty("devInstall").isPresent) {
+                applicationIdSuffix = ".dev"
+                resValue("string", "app_name", "Mika Dev")
+            }
         }
         // Test workspace build: keeps every Mika capability but installs beside the official package.
         create("workspace") {
@@ -165,6 +171,8 @@ dependencies {
 
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.compose.ui.test.junit4)
+    // Older transitive Espresso reflects on InputManager.getInstance(), removed on newer devices.
+    androidTestImplementation(libs.androidx.test.espresso)
     debugImplementation(libs.compose.ui.test.manifest)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.ext.junit)

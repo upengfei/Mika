@@ -53,6 +53,8 @@ import com.wangzan101.mika.ui.MainActivity
 import com.wangzan101.mika.ui.ScreenCopy
 import com.wangzan101.mika.ui.StatusCopy
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -62,6 +64,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.update
 import java.util.concurrent.atomic.AtomicInteger
+import java.time.LocalTime
 import com.wangzan101.mika.core.cap.web.KeptPageClose
 
 /**
@@ -70,6 +73,9 @@ import com.wangzan101.mika.core.cap.web.KeptPageClose
  */
 internal fun Notification.Builder.alertQuietly(): Notification.Builder =
     setGroup(QUIET_GROUP).setGroupAlertBehavior(Notification.GROUP_ALERT_SUMMARY)
+
+internal fun Notification.Builder.applyScheduledQuietHours(context: Context): Notification.Builder =
+    if (FeatureFlags.get(context).scheduledQuietHours().isQuietAt(LocalTime.now())) alertQuietly() else this
 
 private const val QUIET_GROUP = "com.wangzan101.mika.quiet"
 
@@ -98,16 +104,19 @@ class TaskService : Service() {
         }
     }
     private val outbox get() = (application as com.wangzan101.mika.MikaApp).outbox
-    private val localChannel by lazy { LocalChannel { _, delivery ->
+    private val localChannel by lazy { localDeliveryChannel(scheduled = false) }
+    private val scheduledLocalChannel by lazy { localDeliveryChannel(scheduled = true) }
+
+    private fun localDeliveryChannel(scheduled: Boolean) = LocalChannel { _, delivery ->
         if (delivery is Delivery.Ask) {
             center.byConversation(delivery.threadId)?.let(::refreshNotifications)
             SendOutcome.Delivered
         } else {
             val resultId = if (delivery is Delivery.Result && center.byConversation(delivery.threadId)?.parallel == false) ID_RESULT
                 else nextResultId()
-            notifyDelivery(this, delivery, resultId)
+            notifyDelivery(this, delivery, resultId, scheduled)
         }
-    } }
+    }
     /** 前台常驻通知属于哪个任务;收尾后留着,直到换成别的任务。 */
     @Volatile private var foreground: TaskRun? = null
     private val notifyLock = Any()
@@ -170,8 +179,8 @@ class TaskService : Service() {
         }.onFailure { center.followUps.add(item) }
     }
 
-    private fun channelFor(peer: ChannelPeer): Channel = when (peer.channelId) {
-        LocalChannel.ID -> localChannel
+    private fun channelFor(peer: ChannelPeer, scheduled: Boolean = false): Channel = when (peer.channelId) {
+        LocalChannel.ID -> if (scheduled) scheduledLocalChannel else localChannel
         else -> checkNotNull((application as com.wangzan101.mika.MikaApp).wechat.channelFor(peer.channelId)) {
             "unknown channel ${peer.channelId}"
         }
@@ -455,8 +464,14 @@ class TaskService : Service() {
     private fun launch(run: TaskRun, store: ConversationStore) {
         run.job = scope.launch {
             center.markRunning(run)
+            // 定时任务没人在场,卡住了没人停:跑过设置里的最长运行时间就停下(默认不限制)
+            val limitMinutes = if (run.triggerWindowKey != null) FeatureFlags.get(this@TaskService).triggerRunMinutes() else null
             val result = try {
-                run.execute(runCatching { store.turns(run.conversationId) }.getOrDefault(emptyList()).map(::withKeptState))
+                val prior = runCatching { store.turns(run.conversationId) }.getOrDefault(emptyList()).map(::withKeptState)
+                if (limitMinutes == null) run.execute(prior) else withTimeout(limitMinutes * 60_000L) { run.execute(prior) }
+            } catch (e: TimeoutCancellationException) {
+                if (limitMinutes != null) TaskState.Failed(tr(R.string.task_trigger_time_limit, limitMinutes), FailKind.TimeLimit)
+                else TaskState.Cancelled
             } catch (e: CancellationException) {
                 TaskState.Cancelled
             } catch (e: RemoteException) {
@@ -886,21 +901,35 @@ class TaskService : Service() {
     private suspend fun prepareResult(run: TaskRun, end: TaskState, deliveryId: String) {
         val (title, text) = describe(end)
         val peer = run.channelPeer ?: ChannelPeer(LocalChannel.ID, "phone-owner", run.conversationId)
-        ResultDelivery.prepare(outbox, channelFor(peer), peer,
+        ResultDelivery.prepare(outbox, channelFor(peer, run.triggerWindowKey != null), peer,
             Delivery.Result(deliveryId, run.conversationId, text, title = title), run.sharedFiles.value)
     }
 
     private suspend fun notifyResult(run: TaskRun, end: TaskState, deliveryId: String): DeliveryState {
         prepareResult(run, end, deliveryId)
-        val (title, text) = describe(end)
+        val (title, text) = describe(end).let { plain ->
+            val streak = failureStreak(run, end) ?: return@let plain
+            tr(R.string.trigger_failed_streak, streak) to "${plain.second}\n${tr(R.string.trigger_failed_streak_hint)}"
+        }
         val peer = run.channelPeer ?: ChannelPeer(LocalChannel.ID, "phone-owner", run.conversationId)
         val started = SystemClock.elapsedRealtime()
-        val delivered = ResultDelivery.send(outbox, channelFor(peer), peer,
+        val delivered = ResultDelivery.send(outbox, channelFor(peer, run.triggerWindowKey != null), peer,
             Delivery.Result(deliveryId, run.conversationId, text, title = title))
         val finished = SystemClock.elapsedRealtime()
         val sinceReady = if (run.resultReadyAtMs > 0) finished - run.resultReadyAtMs else -1
         Log.i(TAG, "result $delivered: delivery ${finished - started} ms, since ready $sinceReady ms")
         return delivered
+    }
+
+    /**
+     * 定时任务这次又没成,连上之前接连失败的到了 [FAILURE_STREAK_NOTICE] 次及以上时是总次数(含这次):
+     * 通知标题写明连着失败了几次、提醒去暂停或修改,免得每次只看到一条普通的失败。查不到记录时按没有连续失败算。
+     */
+    private fun failureStreak(run: TaskRun, end: TaskState): Int? {
+        val key = run.triggerWindowKey ?: return null
+        if (end is TaskState.Succeeded || end == TaskState.Cancelled) return null
+        val streak = runCatching { TriggerRuntime.failureStreakBefore(this, key) }.getOrDefault(0) + 1
+        return streak.takeIf { it >= FAILURE_STREAK_NOTICE }
     }
 
     private fun action(run: TaskRun, title: String, action: String, code: Int): Notification.Action {
@@ -957,7 +986,7 @@ class TaskService : Service() {
         internal fun nextResultId() = ID_RESULT_FIRST + resultCount.getAndIncrement() % RESULT_IDS
 
         /** 结果与提示发成通知(服务里的与 App 启动时恢复用的共用);[resultId] 是结果通知的编号。 */
-        internal fun notifyDelivery(context: Context, delivery: Delivery, resultId: Int): SendOutcome {
+        internal fun notifyDelivery(context: Context, delivery: Delivery, resultId: Int, scheduled: Boolean = false): SendOutcome {
             val nm = context.getSystemService(NotificationManager::class.java)
             when (delivery) {
                 is Delivery.Result -> nm.notify(resultId, Notification.Builder(context, CHANNEL_RESULT)
@@ -967,10 +996,13 @@ class TaskService : Service() {
                     .setStyle(Notification.BigTextStyle().bigText(delivery.text))
                     .setContentIntent(openApp(context, delivery.threadId))
                     .setAutoCancel(true)
+                    .apply { if (scheduled) applyScheduledQuietHours(context) }
                     .build())
                 is Delivery.Notice -> nm.notify(nextResultId(), Notification.Builder(context, CHANNEL_RESULT)
                     .setSmallIcon(R.drawable.ic_notification).setContentTitle("Mika")
-                    .setContentText(delivery.text).setContentIntent(openApp(context, delivery.threadId)).setAutoCancel(true).build())
+                    .setContentText(delivery.text).setContentIntent(openApp(context, delivery.threadId)).setAutoCancel(true)
+                    .apply { if (scheduled) applyScheduledQuietHours(context) }
+                    .build())
                 is Delivery.Ask, is Delivery.Progress, is Delivery.Image -> {}
             }
             return SendOutcome.Delivered
@@ -1001,6 +1033,8 @@ class TaskService : Service() {
         /** 关掉任务结束后留在后台的那一页(通知上的按钮)。 */
         const val ACTION_CLOSE_KEPT_PAGE = "com.wangzan101.mika.task.CLOSE_KEPT_PAGE"
         const val ACTION_DECLINE = "com.wangzan101.mika.task.DECLINE"
+        /** 定时任务连着失败到这么多次(含这次)起,结果通知里写明连续失败。 */
+        internal const val FAILURE_STREAK_NOTICE = 3
         private const val EXTRA_GOAL = "goal"
         private const val EXTRA_MESSAGE_ID = "message_id"
         private const val EXTRA_SOURCE = "source"

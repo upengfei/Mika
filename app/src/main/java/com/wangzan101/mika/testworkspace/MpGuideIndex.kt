@@ -1,6 +1,7 @@
 package com.wangzan101.mika.testworkspace
 
 import com.wangzan101.mika.core.knowledge.*
+import com.wangzan101.mika.core.skills.PLUGIN_KIND
 
 /** Bounded personal recommendations; full lookup tools and built-in instructions remain available. */
 object MpGuideIndex {
@@ -12,6 +13,7 @@ object MpGuideIndex {
     fun index(catalog: GuideCatalog, task: String, installed: List<Pair<String, String>> = emptyList()): String {
         val knowledge = catalog.find(task, limit = 3, minScore = RECOMMEND_MIN_SCORE, among = KNOWLEDGE_KINDS)
         val builtIn = catalog.items.filter { it.kind == KnowledgeIndex.SKILL }.sortedBy { it.name }
+        val plugins = catalog.items.filter { it.kind == PLUGIN_KIND }.sortedBy { it.name }
         val matched = catalog.find(task, limit = Int.MAX_VALUE, among = setOf(PERSONAL_KIND))
         val appNames = knowledge.map { it.name }.toSet() + installed.filter { (pkg, name) ->
             task.contains(pkg, ignoreCase = true) || (name.length >= 2 && task.contains(name, ignoreCase = true))
@@ -26,6 +28,7 @@ object MpGuideIndex {
         return buildString {
             if (knowledge.isNotEmpty()) appendLine("App and website knowledge (read with knowledge_read when needed):\n" + knowledge.joinToString("\n") { line(it) })
             if (builtIn.isNotEmpty()) appendLine("Built-in skills (read with skill_read before using):\n" + builtIn.joinToString("\n") { line(it) })
+            if (plugins.isNotEmpty()) appendLine("Installed plugin skills (read with skill_read before using):\n" + plugins.joinToString("\n") { line(it, compact = true) })
             if (personal.isNotEmpty()) appendLine("Related personal skills (read with skill_read before using; verify trial results):\n" + personal.joinToString("\n"))
             append("This index is partial. Use skill_search to find other skills; skill_read can read any available skill by name.")
         }
