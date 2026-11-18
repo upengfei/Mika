@@ -76,7 +76,8 @@ jobs:
           cache-provider: basic
       - name: Run unit tests
         if: steps.sync.outputs.changed == 'true'
-        run: bash tools/ci/gradle-with-network-retry.sh :core:test :app:testDebugUnitTest
+        # Compiling Mika and its tests can exceed the default Kotlin daemon heap.
+        run: bash tools/ci/gradle-with-network-retry.sh -Pkotlin.daemon.jvmargs=-Xmx4g :core:test :app:testDebugUnitTest
       - name: Restore MP signing key
         if: steps.sync.outputs.changed == 'true'
         env:
@@ -91,7 +92,7 @@ jobs:
           MP_SIGNING_STORE_PASSWORD: ${{ secrets.MP_SIGNING_STORE_PASSWORD }}
           MP_SIGNING_KEY_ALIAS: ${{ secrets.MP_SIGNING_KEY_ALIAS }}
           MP_SIGNING_KEY_PASSWORD: ${{ secrets.MP_SIGNING_KEY_PASSWORD }}
-        run: bash tools/ci/gradle-with-network-retry.sh :app:assembleWorkspace -PmpReleaseRepository=https://github.com/upengfei/Mika -PmpVersionCode=${{ steps.sync.outputs.version_code }}
+        run: bash tools/ci/gradle-with-network-retry.sh -Pkotlin.daemon.jvmargs=-Xmx4g :app:assembleWorkspace -PmpReleaseRepository=https://github.com/upengfei/Mika -PmpVersionCode=${{ steps.sync.outputs.version_code }}
       - name: Emulator startup smoke test
         if: steps.sync.outputs.changed == 'true'
         uses: reactivecircus/android-emulator-runner@v2
