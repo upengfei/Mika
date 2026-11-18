@@ -14,4 +14,6 @@
 
 仓库：`https://github.com/upengfei/Mika`。源码镜像保留在 `main`，MP工作台改动放在 `mp-workspace`。将 `mp-workspace` 设为 fork 的默认分支，GitHub 才会按计划触发该分支里的定时工作流；`main` 仍只保存 Mika 上游镜像。首次启用前，在 fork 的 Settings → Secrets and variables → Actions 添加 `MP_SIGNING_KEYSTORE_BASE64`、`MP_SIGNING_STORE_PASSWORD`、`MP_SIGNING_KEY_ALIAS` 和 `MP_SIGNING_KEY_PASSWORD`。这些值必须来自当前手机已安装 MP工作台所用的签名密钥；签名密钥另存加密离线备份，不要提交到 Git。
 
-`.github/workflows/mp-sync-release.yml` 每 6 小时检查 `wangzan101/Mika` 的 `main`，只在发现新上游提交时将其合并进 `mp-workspace`。工作流依次运行 `:core:test`、`:app:testDebugUnitTest`、用既有签名构建 workspace APK、运行 Android 模拟器启动冒烟，然后推送分支并发布带 `mp-v` 前缀的 Release。`mp-version-code.txt` 为 MP 包单独递增版本码，即使 Mika 上游提交没有改版本号，也能覆盖安装。普通 Mika 构建和更新 API 不变。
+`.github/workflows/mp-sync-release.yml` 每 6 小时检查 `wangzan101/Mika` 的 `main`，有新提交才尝试合并。若合并冲突，本次同步失败并停止发布。需要发布已验证的 MP 版本时，在 GitHub Actions 选择 **MP workspace upstream sync and release → Run workflow**，保持 `sync_upstream` 关闭即可直接构建当前 `mp-workspace`；开启该选项则先尝试合并上游。
+
+发布前会运行 `:core:test`、`:app:testDebugUnitTest`，用既有签名构建 workspace APK，并在 Android 模拟器验证启动；全部通过后才推送分支并创建带 `mp-v` 前缀的 Release。`mp-version-code.txt` 为 MP 包单独递增版本码，即使 Mika 上游提交没有改版本号，也能覆盖安装。普通 Mika 构建和更新 API 不变。
